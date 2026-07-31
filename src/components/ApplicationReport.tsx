@@ -95,7 +95,7 @@ function ApplicationCard({
       {dismissed && (
         <p className="text-sm text-[var(--foreground)]/85">
           {app.skip_reason ||
-            "הוסר מהפול (לחיצה על ״הסר מהפול״, או גרסה ישנה שסימנה פתיחת קישור)."}
+            "לא מעוניין — הוסר מהפול. המערכת לומדת לא להציע משרות דומות."}
         </p>
       )}
       {webForm && (
@@ -273,7 +273,7 @@ export function ApplicationReport({
             </h3>
             {openedApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                משרות שהוסרו מהפול ידנית (״הסר מהפול״). אפשר להחזיר עם ״החזר
+                משרות שסומנו ״לא מעוניין״. אפשר להחזיר עם ״החזר
                 לפול״.
               </p>
             ) : (
