@@ -35,6 +35,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [autoApplyBusyId, setAutoApplyBusyId] = useState<string | null>(null);
+  const [dismissBusyId, setDismissBusyId] = useState<string | null>(null);
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [autofillJob, setAutofillJob] = useState<{
@@ -122,6 +123,12 @@ export function HomeClient({ email }: { email?: string | null }) {
 
   const markJobOpened = useCallback(
     async (jobId: string, matchId?: string) => {
+      if (!jobId) {
+        setMessage("חסר מזהה משרה — רענן את הפול ונסה שוב");
+        return;
+      }
+      setDismissBusyId(jobId);
+      setMessage(null);
       try {
         const res = await fetch("/api/applications/open", {
           method: "POST",
@@ -132,7 +139,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             resumeId: resume?.id,
           }),
         });
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "סימון נכשל");
 
         const dismissed = matches.find(
@@ -148,7 +155,11 @@ export function HomeClient({ email }: { email?: string | null }) {
             const c = (m.jobs?.company || "").trim().toLowerCase();
             const t = (m.jobs?.title || "").trim().toLowerCase();
             if (company && c && c === company) return false;
-            if (title && t && (t === title || t.includes(title) || title.includes(t))) {
+            if (
+              title &&
+              t &&
+              (t === title || t.includes(title) || title.includes(t))
+            ) {
               return false;
             }
             return true;
@@ -164,6 +175,8 @@ export function HomeClient({ email }: { email?: string | null }) {
         );
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הסרה נכשלה");
+      } finally {
+        setDismissBusyId(null);
       }
     },
     [resume, matches, loadMatches, loadApplications],
@@ -490,6 +503,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               onPrepareApply={prepareApplyFromMatch}
               onAutoApply={(m) => void autoApplyFromMatch(m)}
               autoApplyBusyId={autoApplyBusyId}
+              dismissBusyId={dismissBusyId}
             />
           </section>
         )}
