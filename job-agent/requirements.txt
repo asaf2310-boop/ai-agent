@@ -6,3 +6,4 @@ beautifulsoup4
 python-multipart
 jinja2
 apscheduler
+python-dotenv
