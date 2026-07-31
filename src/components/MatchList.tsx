@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
-import { safeJobOpenUrl } from "@/lib/linkedin-url";
-import { canAutoApplyJob } from "@/lib/web-apply";
+import { hasActiveJobLink, safeJobOpenUrl } from "@/lib/linkedin-url";
 import {
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
@@ -283,7 +282,8 @@ export function MatchList({
               channel: job?.channel,
               external_id: job?.external_id,
             });
-            const showAutoApply = Boolean(job && canAutoApplyJob(job));
+            // Any openable job can be marked נשלח + moved to history
+            const showAutoApply = Boolean(job && hasActiveJobLink(job));
             return (
               <li key={match.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
