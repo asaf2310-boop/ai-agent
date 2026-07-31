@@ -325,7 +325,7 @@ export function MatchList({
                   >
                     מלא טופס מהקו״ח
                   </button>
-                  {openUrl && (
+                  {openUrl ? (
                     <a
                       href={openUrl}
                       target="_blank"
@@ -334,6 +334,14 @@ export function MatchList({
                     >
                       פתח באתר ↗
                     </a>
+                  ) : (
+                    /telegram|facebook/i.test(
+                      `${job?.channel || ""} ${job?.source || ""}`,
+                    ) && (
+                      <span className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)]">
+                        אין קישור תקין (פוסט דמו)
+                      </span>
+                    )
                   )}
                   {job?.id && (
                     <button

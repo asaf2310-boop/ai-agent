@@ -218,12 +218,14 @@ SOCIAL_SPECS: list[dict[str, str]] = [
 ]
 
 
-def _social_url(channel: str, job_id: str) -> str:
+def _social_url(channel: str, job_id: str, title: str = "") -> str | None:
+    # Never invent fake t.me / Facebook handles — Telegram shows "user does not exist".
     if channel == "linkedin":
-        return f"https://www.linkedin.com/feed/update/urn:li:activity:{job_id}"
-    if channel == "telegram":
-        return f"https://t.me/s/example_il_jobs/{job_id}"
-    return f"https://www.facebook.com/groups/example.il.freelance/posts/{job_id}"
+        from urllib.parse import quote
+
+        q = quote((title or "Israel jobs")[:120])
+        return f"https://www.linkedin.com/jobs/search/?keywords={q}&location=Israel"
+    return None
 
 
 def catalog_board_job_dicts() -> list[dict[str, Any]]:
@@ -256,14 +258,16 @@ def catalog_social_post_dicts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for spec in SOCIAL_SPECS:
         channel = spec["channel"]
+        job_id = spec["id"]
+        title = spec["title"]
         rows.append(
             {
                 "source": f"social-{channel}",
-                "external_id": spec["id"],
-                "title": spec["title"],
+                "external_id": job_id,
+                "title": title,
                 "company": spec["company"],
                 "location": spec["location"],
-                "url": _social_url(channel, spec["id"]),
+                "url": _social_url(channel, job_id, title),
                 "description": spec["description"],
                 "posted_at": now,
                 "apply_email": None,

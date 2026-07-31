@@ -11,7 +11,7 @@ export type CatalogJob = {
   title: string;
   company: string;
   location: string;
-  url: string;
+  url: string | null;
   description: string;
   apply_email: string | null;
   post_kind: "job" | "freelance" | "social";
@@ -63,10 +63,11 @@ const base = (
     company,
     location,
     url:
-      opts?.url ||
-      (isSocial
-        ? linkedInJobsSearchUrl(title)
-        : boardUrl(source.includes("social") ? "linkedin" : source, id)),
+      opts?.url !== undefined
+        ? opts.url
+        : isSocial
+          ? linkedInJobsSearchUrl(title)
+          : boardUrl(source.includes("social") ? "linkedin" : source, id),
     description: applyEmail
       ? `${description} הגשה במייל: ${applyEmail}`
       : description,
@@ -334,12 +335,8 @@ export const ISRAEL_JOB_CATALOG: CatalogJob[] = [
       post_kind: s.post_kind,
       channel: s.channel,
       is_social: true,
-      url:
-        s.channel === "linkedin"
-          ? linkedInJobsSearchUrl(s.title)
-          : s.channel === "telegram"
-            ? `https://t.me/s/israel_jobs`
-            : `https://www.facebook.com/jobs/`,
+      // Never invent fake t.me / Facebook handles — they show "user does not exist".
+      url: s.channel === "linkedin" ? linkedInJobsSearchUrl(s.title) : null,
     }),
   ),
 ];

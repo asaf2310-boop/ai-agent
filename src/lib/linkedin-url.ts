@@ -108,7 +108,7 @@ export function normalizeLinkedInOpenUrl(
   }
 }
 
-/** Best URL to open for any job (repairs LinkedIn; passes through others). */
+/** Best URL to open for any job (repairs LinkedIn; blocks fake social demos). */
 export function safeJobOpenUrl(job: {
   url?: string | null;
   title?: string | null;
@@ -117,6 +117,19 @@ export function safeJobOpenUrl(job: {
   external_id?: string | null;
 }): string | null {
   const url = (job.url || "").trim();
+  if (!url) return null;
+
+  // Lazy import avoided — callers also use social-url; check patterns here
+  if (
+    /t\.me\/(?:s\/)?(?:example[_-]?i[lt]?[_-]?jobs|israel_jobs|example)(?:\/|$|\?)/i.test(
+      url,
+    ) ||
+    /t\.me\/[^/]+\/(?:tg-|li-f-|fb-)/i.test(url) ||
+    /facebook\.com\/(?:groups\/)?example(?:\.il)?(?:\.freelance)?/i.test(url)
+  ) {
+    return null;
+  }
+
   const isLi =
     /linkedin/i.test(job.source || "") ||
     /linkedin/i.test(job.channel || "") ||
@@ -129,7 +142,6 @@ export function safeJobOpenUrl(job: {
     });
   }
 
-  if (!url) return null;
   if (url.startsWith("/")) return null;
   return url;
 }
