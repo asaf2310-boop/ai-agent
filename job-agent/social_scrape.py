@@ -26,6 +26,36 @@ JOB_HINTS = re.compile(
     re.I,
 )
 
+ISRAEL_POSITIVE = re.compile(
+    r"israel|ישראל|tel[\s-]?aviv|תל אביב|jerusalem|ירושלים|haifa|חיפה|"
+    r"herzliya|הרצליה|ramat gan|רמת גן|petah|פתח תקווה|רעננה|raanana|"
+    r"באר שבע|beer sheva|נתניה|netanya|ראשון|אשדוד|מודעין|"
+    r"remote\s*-?\s*israel|israel\s*/\s*remote|\bil\b",
+    re.I,
+)
+
+ISRAEL_NEGATIVE = re.compile(
+    r"united states|\busa\b|nebraska|kearney|new york|california|texas|"
+    r"london|united kingdom|\buk\b|germany|berlin|paris|france|india|"
+    r"bangalore|canada|toronto|australia|sydney",
+    re.I,
+)
+
+
+def is_israel_job(
+    location: str | None,
+    description: str | None = None,
+    company: str | None = None,
+) -> bool:
+    blob = f"{location or ''} {description or ''} {company or ''}"
+    if ISRAEL_POSITIVE.search(blob):
+        return True
+    if ISRAEL_NEGATIVE.search(blob):
+        return False
+    if re.search(r"remote|worldwide|anywhere|global", blob, re.I):
+        return False
+    return False
+
 
 def _id_from_url(url: str) -> str:
     return hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
@@ -125,13 +155,17 @@ def fetch_remoteok(limit: int = 25) -> list[ScrapedJob]:
     for item in data:
         if not isinstance(item, dict) or not item.get("id") or not item.get("position"):
             continue
+        location = str(item.get("location") or "")
+        description = re.sub("<[^>]+>", " ", str(item.get("description") or ""))[:4000]
+        company = item.get("company")
+        if not is_israel_job(location, description, str(company or "")):
+            continue
         text = " ".join(
             str(item.get(k) or "")
-            for k in ("position", "description", "tags", "company")
+            for k in ("position", "description", "tags", "company", "location")
         )
         if not (FREELANCE_HINTS.search(text) or JOB_HINTS.search(text)):
             continue
-        tags = item.get("tags") or []
         kind = "freelance" if FREELANCE_HINTS.search(text) else "job"
         url = item.get("url") or f"https://remoteok.com/remote-jobs/{item.get('id')}"
         epoch = item.get("epoch") or item.get("date")
@@ -143,10 +177,10 @@ def fetch_remoteok(limit: int = 25) -> list[ScrapedJob]:
                 source="remoteok",
                 external_id=str(item["id"]),
                 title=str(item["position"]),
-                company=item.get("company"),
-                location=item.get("location") or "Remote",
+                company=company,
+                location=location or "Israel",
                 url=url,
-                description=re.sub("<[^>]+>", " ", str(item.get("description") or ""))[:4000],
+                description=description,
                 posted_at=posted,
                 apply_email=None,
                 post_kind=kind,
@@ -175,11 +209,15 @@ def fetch_remotive(limit: int = 25) -> list[ScrapedJob]:
     for item in data.get("jobs") or []:
         title = item.get("title") or ""
         desc = item.get("description") or ""
+        location = item.get("candidate_required_location") or ""
+        company = item.get("company_name")
+        if not is_israel_job(str(location), desc, str(company or "")):
+            continue
         text = f"{title} {desc} {item.get('job_type') or ''}"
         kind = "freelance" if FREELANCE_HINTS.search(text) else "job"
         if kind == "job" and not JOB_HINTS.search(text):
             continue
-        url = item.get("url") or item.get("candidate_required_location")
+        url = item.get("url")
         if not url:
             continue
         jobs.append(
@@ -187,8 +225,8 @@ def fetch_remotive(limit: int = 25) -> list[ScrapedJob]:
                 source="remotive",
                 external_id=str(item.get("id") or _id_from_url(url)),
                 title=title,
-                company=item.get("company_name"),
-                location=item.get("candidate_required_location") or "Remote",
+                company=company,
+                location=str(location) or "Israel",
                 url=url,
                 description=re.sub("<[^>]+>", " ", desc)[:4000],
                 posted_at=_parse_date(item.get("publication_date")),
@@ -230,6 +268,10 @@ def fetch_rss_feed(feed_url: str, limit: int = 20) -> list[ScrapedJob]:
         blob = f"{title} {desc}"
         if not (FREELANCE_HINTS.search(blob) or JOB_HINTS.search(blob)):
             continue
+        if not is_israel_job("Israel", blob, host):
+            # RSS items often lack location — require IL keywords in text
+            if not ISRAEL_POSITIVE.search(blob):
+                continue
         kind = "freelance" if FREELANCE_HINTS.search(blob) else "social"
         jobs.append(
             ScrapedJob(
@@ -237,7 +279,7 @@ def fetch_rss_feed(feed_url: str, limit: int = 20) -> list[ScrapedJob]:
                 external_id=_id_from_url(link or title),
                 title=title or "Social job post",
                 company=f"RSS · {host}",
-                location="Remote / IL",
+                location="Israel",
                 url=link or feed_url,
                 description=re.sub("<[^>]+>", " ", desc)[:4000],
                 posted_at=_parse_date(text("pubDate") or text("published") or text("updated")),
@@ -252,8 +294,8 @@ def fetch_rss_feed(feed_url: str, limit: int = 20) -> list[ScrapedJob]:
 
 def discover_social_jobs() -> list[ScrapedJob]:
     discovered: list[ScrapedJob] = []
-    discovered.extend(fetch_remoteok())
-    discovered.extend(fetch_remotive())
+    discovered.extend(fetch_remoteok(limit=40))
+    discovered.extend(fetch_remotive(limit=40))
 
     rss_urls = [
         u.strip()
@@ -263,12 +305,14 @@ def discover_social_jobs() -> list[ScrapedJob]:
     for url in rss_urls:
         discovered.extend(fetch_rss_feed(url))
 
-    # Always include IL-style social samples so the UI has local freelance/social links
     discovered.extend(sample_social_posts())
 
-    # Deduplicate by source+external_id
     uniq: dict[tuple[str, str], ScrapedJob] = {}
     for job in discovered:
+        if not is_israel_job(job.location, job.description, job.company):
+            # keep explicit IL social samples
+            if not str(job.source).startswith("social"):
+                continue
         uniq[(job.source, job.external_id)] = job
     return list(uniq.values())
 

@@ -79,6 +79,46 @@ def sample_jobs() -> list[ScrapedJob]:
             description="Node, React, Docker, AWS. End-to-end product ownership.",
             posted_at=now - timedelta(hours=12),
         ),
+        ScrapedJob(
+            source="sample",
+            external_id="il-devops-004",
+            title="DevOps Engineer",
+            company="Galilee Cloud",
+            location="Herzliya",
+            url="https://example.com/jobs/devops-004",
+            description="AWS, Docker, Kubernetes, CI/CD, Terraform. Israel on-site/hybrid.",
+            posted_at=now - timedelta(hours=8),
+        ),
+        ScrapedJob(
+            source="sample",
+            external_id="il-data-005",
+            title="Data Engineer",
+            company="Jerusalem Analytics",
+            location="Jerusalem",
+            url="https://example.com/jobs/data-005",
+            description="Python, SQL, Airflow, Spark. Build data pipelines in Israel.",
+            posted_at=now - timedelta(hours=6),
+        ),
+        ScrapedJob(
+            source="sample",
+            external_id="il-qa-006",
+            title="QA Automation Engineer",
+            company="Ramat Gan Soft",
+            location="Ramat Gan",
+            url="https://example.com/jobs/qa-006",
+            description="Playwright, Cypress, JavaScript, CI. Hybrid Tel Aviv area.",
+            posted_at=now - timedelta(hours=4),
+        ),
+        ScrapedJob(
+            source="sample",
+            external_id="il-mobile-008",
+            title="Mobile Developer (React Native)",
+            company="Beach Apps IL",
+            location="Tel Aviv",
+            url="https://example.com/jobs/mobile-008",
+            description="React Native, TypeScript, mobile CI. On-site Tel Aviv.",
+            posted_at=now - timedelta(hours=3),
+        ),
     ]
 
 
@@ -442,7 +482,7 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
 
 def run() -> None:
     schema = os.getenv("SUPABASE_SCHEMA", "job_agent")
-    min_score = float(os.getenv("MIN_MATCH_SCORE", "0.3"))
+    min_score = float(os.getenv("MIN_MATCH_SCORE", "0.25"))
     max_age_days = int(os.getenv("MAX_JOB_AGE_DAYS", "7"))
 
     from social_scrape import discover_social_jobs

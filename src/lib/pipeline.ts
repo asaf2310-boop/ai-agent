@@ -1,3 +1,4 @@
+import { isIsraelLocation } from "@/lib/israel";
 import { scoreMatch } from "@/lib/matching";
 import { tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
@@ -45,6 +46,71 @@ export const SAMPLE_JOBS = [
     url: "https://example.com/jobs/fs-003",
     apply_email: null as string | null,
     description: "Node, React, Docker, AWS. End-to-end product ownership.",
+    post_kind: "job" as const,
+    channel: null as string | null,
+    is_social: false,
+  },
+  {
+    source: "sample",
+    external_id: "il-devops-004",
+    title: "DevOps Engineer",
+    company: "Galilee Cloud",
+    location: "Herzliya",
+    url: "https://example.com/jobs/devops-004",
+    apply_email: null as string | null,
+    description: "AWS, Docker, Kubernetes, CI/CD, Terraform. Israel on-site/hybrid.",
+    post_kind: "job" as const,
+    channel: null as string | null,
+    is_social: false,
+  },
+  {
+    source: "sample",
+    external_id: "il-data-005",
+    title: "Data Engineer",
+    company: "Jerusalem Analytics",
+    location: "Jerusalem",
+    url: "https://example.com/jobs/data-005",
+    apply_email: null as string | null,
+    description: "Python, SQL, Airflow, Spark. Build data pipelines in Israel.",
+    post_kind: "job" as const,
+    channel: null as string | null,
+    is_social: false,
+  },
+  {
+    source: "sample",
+    external_id: "il-qa-006",
+    title: "QA Automation Engineer",
+    company: "Ramat Gan Soft",
+    location: "Ramat Gan",
+    url: "https://example.com/jobs/qa-006",
+    apply_email: null as string | null,
+    description: "Playwright, Cypress, JavaScript, CI. Hybrid Tel Aviv area.",
+    post_kind: "job" as const,
+    channel: null as string | null,
+    is_social: false,
+  },
+  {
+    source: "sample",
+    external_id: "il-pm-007",
+    title: "Product Manager — B2B SaaS",
+    company: "Startup Nation Hub",
+    location: "Tel Aviv",
+    url: "https://example.com/jobs/pm-007",
+    apply_email: null as string | null,
+    description: "Product ownership for Israeli B2B SaaS. Hebrew + English.",
+    post_kind: "job" as const,
+    channel: null as string | null,
+    is_social: false,
+  },
+  {
+    source: "sample",
+    external_id: "il-mobile-008",
+    title: "Mobile Developer (React Native)",
+    company: "Beach Apps IL",
+    location: "Tel Aviv",
+    url: "https://example.com/jobs/mobile-008",
+    apply_email: null as string | null,
+    description: "React Native, TypeScript, mobile CI. On-site Tel Aviv.",
     post_kind: "job" as const,
     channel: null as string | null,
     is_social: false,
@@ -133,19 +199,12 @@ async function upsertJobBatch(
 }
 
 export async function ensureSampleJobs(supabase: DbClient) {
-  const { count } = await supabase
-    .from("jobs")
-    .select("*", { count: "exact", head: true });
-
-  if ((count ?? 0) === 0) {
-    await upsertJobBatch(supabase, SAMPLE_JOBS);
-  }
-
-  // Always refresh social/freelance samples so links appear in the UI
+  // Always upsert IL catalog + social samples (Israel only)
+  await upsertJobBatch(supabase, SAMPLE_JOBS);
   await upsertJobBatch(supabase, SAMPLE_SOCIAL_POSTS);
 }
 
-/** Pull live remote/freelance listings into Supabase (best-effort). */
+/** Pull live listings — Israel only. */
 export async function syncLiveSocialJobs(supabase: DbClient) {
   const rows: Array<Record<string, unknown>> = [];
 
@@ -158,21 +217,24 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
       const data = (await res.json()) as Array<Record<string, unknown>>;
       for (const item of data) {
         if (!item?.id || !item?.position) continue;
-        const text = `${item.position} ${item.description || ""} ${item.company || ""}`;
+        const location = String(item.location || "");
+        const description = String(item.description || "").replace(/<[^>]+>/g, " ");
+        const company = String(item.company || "");
+        if (!isIsraelLocation(location, description, company)) continue;
+
+        const text = `${item.position} ${description} ${company}`;
         const freelance = /freelance|contract|gig|פרילנס/i.test(text);
-        if (!freelance && !/developer|engineer|react|python|full.?stack/i.test(text)) {
+        if (!freelance && !/developer|engineer|react|python|full.?stack|devops|data/i.test(text)) {
           continue;
         }
         rows.push({
           source: "remoteok",
           external_id: String(item.id),
           title: String(item.position),
-          company: (item.company as string) || null,
-          location: (item.location as string) || "Remote",
+          company: company || null,
+          location: location || "Israel",
           url: (item.url as string) || `https://remoteok.com/remote-jobs/${item.id}`,
-          description: String(item.description || "")
-            .replace(/<[^>]+>/g, " ")
-            .slice(0, 4000),
+          description: description.slice(0, 4000),
           apply_email: null,
           post_kind: freelance ? "freelance" : "job",
           channel: "remoteok",
@@ -182,11 +244,51 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
             ? new Date(Number(item.epoch) * 1000).toISOString()
             : new Date().toISOString(),
         });
-        if (rows.length >= 20) break;
+        if (rows.length >= 30) break;
       }
     }
   } catch {
     // optional network source
+  }
+
+  // Also try Remotive with Israel filter
+  try {
+    const res = await fetch(
+      "https://remotive.com/api/remote-jobs?category=software-dev&limit=50",
+      { headers: { "User-Agent": "ai-agent-job-scanner/1.0" }, next: { revalidate: 0 } },
+    );
+    if (res.ok) {
+      const data = (await res.json()) as { jobs?: Array<Record<string, unknown>> };
+      for (const item of data.jobs || []) {
+        const location = String(item.candidate_required_location || "");
+        const description = String(item.description || "").replace(/<[^>]+>/g, " ");
+        const company = String(item.company_name || "");
+        if (!isIsraelLocation(location, description, company)) continue;
+        const url = String(item.url || "");
+        if (!url) continue;
+        rows.push({
+          source: "remotive",
+          external_id: String(item.id || url),
+          title: String(item.title || "Role"),
+          company: company || null,
+          location: location || "Israel",
+          url,
+          description: description.slice(0, 4000),
+          apply_email: null,
+          post_kind: /freelance|contract/i.test(`${item.job_type} ${description}`)
+            ? "freelance"
+            : "job",
+          channel: "remotive",
+          is_social: true,
+          scraped_at: new Date().toISOString(),
+          posted_at: item.publication_date
+            ? String(item.publication_date)
+            : new Date().toISOString(),
+        });
+      }
+    }
+  } catch {
+    // optional
   }
 
   if (rows.length) {
@@ -205,13 +307,30 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
     if (error) throw new Error(error.message);
   }
 
+  // Remove previously ingested non-Israel remoteok/remotive noise (best-effort)
+  try {
+    const { data: foreign } = await supabase
+      .from("jobs")
+      .select("id, location, description, company, source")
+      .in("source", ["remoteok", "remotive"])
+      .limit(200);
+    const badIds = ((foreign || []) as Job[])
+      .filter((j) => !isIsraelLocation(j.location, j.description, j.company))
+      .map((j) => j.id);
+    if (badIds.length) {
+      await supabase.from("jobs").delete().in("id", badIds);
+    }
+  } catch {
+    // ignore cleanup failures
+  }
+
   return rows.length;
 }
 
 export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
-  minScore = Number(process.env.MIN_MATCH_SCORE || "0.3"),
+  minScore = Number(process.env.MIN_MATCH_SCORE || "0.25"),
   userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =
@@ -220,9 +339,13 @@ export async function matchResumeToJobs(
   const { data: jobs, error } = await supabase.from("jobs").select("*");
   if (error) throw new Error(error.message);
 
+  const israelJobs = ((jobs || []) as Job[]).filter((job) =>
+    isIsraelLocation(job.location, job.description, job.company),
+  );
+
   const ownerId = userId || resume.user_id;
   const matchRows = [];
-  for (const job of (jobs || []) as Job[]) {
+  for (const job of israelJobs) {
     const { score, reasons } = scoreMatch(resumeText, resume.skills || [], job);
     if (score < minScore) continue;
     matchRows.push({
