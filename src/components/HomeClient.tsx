@@ -36,6 +36,9 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [autoApplyBusyId, setAutoApplyBusyId] = useState<string | null>(null);
   const [dismissBusyId, setDismissBusyId] = useState<string | null>(null);
+  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [autofillJob, setAutofillJob] = useState<{
@@ -62,7 +65,15 @@ export function HomeClient({ email }: { email?: string | null }) {
         const res = await fetch(`/api/matches${qs}`);
         const json = await res.json();
         if (res.ok) {
-          setMatches(json.matches ?? []);
+          const incoming = (json.matches ?? []) as JobMatch[];
+          // Never re-show jobs dismissed in this browser session
+          setMatches(
+            incoming.filter(
+              (m) =>
+                !dismissedJobIds.has(m.job_id) &&
+                !dismissedJobIds.has(m.jobs?.id || ""),
+            ),
+          );
         } else if (!opts?.quiet) {
           setMessage(json.error || "טעינת התאמות נכשלה");
         }
@@ -72,7 +83,7 @@ export function HomeClient({ email }: { email?: string | null }) {
         if (!opts?.quiet) setLoadingMatches(false);
       }
     },
-    [],
+    [dismissedJobIds],
   );
 
   const loadApplications = useCallback(
@@ -129,6 +140,17 @@ export function HomeClient({ email }: { email?: string | null }) {
       }
       setDismissBusyId(jobId);
       setMessage(null);
+
+      // Optimistic remove + remember for this session (survives reload races)
+      setDismissedJobIds((prev) => {
+        const next = new Set(prev);
+        next.add(jobId);
+        return next;
+      });
+      setMatches((prev) =>
+        prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
+      );
+
       try {
         const res = await fetch("/api/applications/open", {
           method: "POST",
@@ -140,33 +162,16 @@ export function HomeClient({ email }: { email?: string | null }) {
           }),
         });
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error || "סימון נכשל");
+        if (!res.ok || json.ok === false) {
+          // Roll back optimistic hide on hard failure
+          setDismissedJobIds((prev) => {
+            const next = new Set(prev);
+            next.delete(jobId);
+            return next;
+          });
+          throw new Error(json.error || "סימון נכשל");
+        }
 
-        const dismissed = matches.find(
-          (m) => m.job_id === jobId || m.jobs?.id === jobId,
-        );
-        const company = (dismissed?.jobs?.company || "").trim().toLowerCase();
-        const title = (dismissed?.jobs?.title || "").trim().toLowerCase();
-
-        // Remove immediately (don't wait for reload — reload used to re-add
-        // the job because dismiss rows were auto-purged as "junk").
-        setMatches((prev) =>
-          prev.filter((m) => {
-            if (m.job_id === jobId || m.jobs?.id === jobId) return false;
-            const c = (m.jobs?.company || "").trim().toLowerCase();
-            const t = (m.jobs?.title || "").trim().toLowerCase();
-            if (company && c && c === company) return false;
-            if (
-              title &&
-              t &&
-              title.length >= 8 &&
-              (t === title || t.includes(title) || title.includes(t))
-            ) {
-              return false;
-            }
-            return true;
-          }),
-        );
         if (json.application) {
           setApplications((prev) => {
             const rest = prev.filter(
@@ -180,16 +185,17 @@ export function HomeClient({ email }: { email?: string | null }) {
           json.detail ||
             "הוסר ✓ — לא יוצג שוב; המערכת תלמד לא להציע משרות דומות",
         );
-        // Refresh in background after local removal
         void loadApplications(resume?.id, { quiet: true });
         void loadMatches(resume?.id, { quiet: true });
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הסרה נכשלה");
+        // Put the list back from server if dismiss failed
+        void loadMatches(resume?.id, { quiet: true });
       } finally {
         setDismissBusyId(null);
       }
     },
-    [resume, matches, loadMatches, loadApplications],
+    [resume, loadMatches, loadApplications],
   );
 
   const restoreToPool = useCallback(

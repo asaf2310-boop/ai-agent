@@ -55,6 +55,9 @@ export async function POST(request: Request) {
       .eq("id", body.jobId)
       .limit(1);
     const job = jobRows?.[0];
+    if (!job) {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
 
     const { data: existing } = await supabase
       .from("applications")
@@ -75,8 +78,13 @@ export async function POST(request: Request) {
       });
     }
 
-    // Already dismissed — idempotent success
     if (current && current.method === "link-opened") {
+      // Ensure match row is gone even if a previous attempt partially failed
+      await supabase
+        .from("job_matches")
+        .delete()
+        .eq("resume_id", resumeId)
+        .eq("job_id", body.jobId);
       return NextResponse.json({
         ok: true,
         application: current,
@@ -86,33 +94,19 @@ export async function POST(request: Request) {
       });
     }
 
-    // Learn: store dismissal signals for future matching
-    if (job) {
-      await recordJobDismissal(supabase, {
-        userId: user.id,
-        resumeId,
-        jobId: body.jobId,
-        job,
-      });
-    }
+    await recordJobDismissal(supabase, {
+      userId: user.id,
+      resumeId,
+      jobId: body.jobId,
+      job,
+    });
 
-    // Drop this match so it won't reappear on the next pool load
-    try {
-      await supabase
-        .from("job_matches")
-        .delete()
-        .eq("resume_id", resumeId)
-        .eq("job_id", body.jobId);
-    } catch {
-      // best-effort
-    }
-
-    // status=skipped + method=link-opened: cleared from pool + history,
-    // and must NOT be treated as junk (see isJunkApplicationRow).
+    // IMPORTANT: match_id must be null — we delete the match row next, and a
+    // FK to a deleted job_matches id makes the upsert fail (job stays in pool).
     const row = {
       resume_id: resumeId,
       job_id: body.jobId,
-      match_id: body.matchId || current?.match_id || null,
+      match_id: null as string | null,
       status: "skipped" as const,
       method: "link-opened",
       skip_reason:
@@ -131,18 +125,36 @@ export async function POST(request: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { error: error.message, ok: false },
+        { status: 500 },
+      );
     }
+
+    // Remove from matches after application is saved (so pool reload hides it)
+    const { error: matchDelError } = await supabase
+      .from("job_matches")
+      .delete()
+      .eq("resume_id", resumeId)
+      .eq("job_id", body.jobId);
+
+    // Also clear any matches for this user+job under other resumes
+    await supabase
+      .from("job_matches")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("job_id", body.jobId);
 
     return NextResponse.json({
       ok: true,
       application: data,
       clearedFromPool: isClearedFromPool(data),
+      matchDeleted: !matchDelError,
       learned: true,
       detail: "הוסר ✓ — לא יוצג שוב; נלמד להימנע ממשרות דומות",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to dismiss job";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, ok: false }, { status: 500 });
   }
 }
