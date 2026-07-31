@@ -19,6 +19,7 @@ export function HomeClient() {
   const [matches, setMatches] = useState<JobMatch[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [summary, setSummary] = useState<Summary | undefined>();
+  const [loadingResume, setLoadingResume] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
@@ -51,12 +52,34 @@ export function HomeClient() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadMatches();
-    void loadApplications();
+  const loadSavedResume = useCallback(async () => {
+    setLoadingResume(true);
+    try {
+      const res = await fetch("/api/resumes");
+      const json = await res.json();
+      if (res.ok && json.resume) {
+        setResume(json.resume as Resume);
+        setMessage("נטען קו״ח שמור מהחשבון שלך — אין צורך להעלות מחדש.");
+        await Promise.all([
+          loadMatches(json.resume.id),
+          loadApplications(json.resume.id),
+        ]);
+        return;
+      }
+      await Promise.all([loadMatches(), loadApplications()]);
+    } finally {
+      setLoadingResume(false);
+    }
   }, [loadMatches, loadApplications]);
 
-  async function handleUploaded(next: Resume, meta?: { matches?: JobMatch[]; applications?: Application[] }) {
+  useEffect(() => {
+    void loadSavedResume();
+  }, [loadSavedResume]);
+
+  async function handleUploaded(
+    next: Resume,
+    meta?: { matches?: JobMatch[]; applications?: Application[] },
+  ) {
     setResume(next);
     if (meta?.matches) setMatches(meta.matches);
     else await loadMatches(next.id);
@@ -67,7 +90,7 @@ export function HomeClient() {
       await loadApplications(next.id);
     }
     setMessage(
-      "הקו״ח הועלה. בוצעו התאמה, שכתוב, וניסיון שליחה — ראה דוח למטה.",
+      "הקו״ח נשמר בחשבון שלך. בוצעו התאמה, שכתוב, וניסיון שליחה — ראה דוח למטה.",
     );
   }
 
@@ -82,11 +105,12 @@ export function HomeClient() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Pipeline failed");
+      if (json.resume) setResume(json.resume as Resume);
       setMatches(json.matches ?? []);
       setApplications(json.applications ?? []);
       await loadApplications(json.resume?.id || resume?.id);
       setMessage(
-        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות, ${json.applicationsCount ?? 0} רשומות בדוח.`,
+        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות בישראל, ${json.applicationsCount ?? 0} רשומות בדוח.`,
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שגיאה בהרצת הסריקה");
@@ -105,22 +129,33 @@ export function HomeClient() {
           משרות בישראל שמתאימות לך
         </h1>
         <p className="max-w-xl text-base text-[var(--muted)]">
-          העלה קו״ח — המערכת סורקת משרות וגם פוסטים ברשתות על דרושים/פרילנס,
-          משכתבת קו״ח, מציגה קישורים, ושולחת התראות. סריקה אוטומטית פעמיים ביום.
+          קו״ח נשמר בחשבון. סריקה בישראל — AI, פיננסים, מוצר, ניהול ועוד — כולל
+          פוסטים בסגנון LinkedIn. סריקה אוטומטית פעמיים ביום.
         </p>
       </header>
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">1. קו״ח</h2>
-        <ResumeUpload onUploaded={handleUploaded} />
-        {resume && (
-          <p className="text-sm text-[var(--muted)]">
-            הועלה:{" "}
-            <span className="text-[var(--foreground)]">{resume.filename}</span>
-            {resume.skills?.length > 0 && (
-              <> · כישורים: {resume.skills.join(", ")}</>
-            )}
-          </p>
+        {loadingResume ? (
+          <p className="text-sm text-[var(--muted)]">טוען קו״ח שמור…</p>
+        ) : resume ? (
+          <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+            <p className="text-sm">
+              קו״ח שמור:{" "}
+              <span className="font-medium text-[var(--foreground)]">
+                {resume.filename}
+              </span>
+              {resume.skills?.length > 0 && (
+                <> · כישורים: {resume.skills.join(", ")}</>
+              )}
+            </p>
+            <p className="text-xs text-[var(--muted)]">
+              אין צורך להעלות שוב. להחלפה — בחר קובץ חדש למטה.
+            </p>
+            <ResumeUpload onUploaded={handleUploaded} />
+          </div>
+        ) : (
+          <ResumeUpload onUploaded={handleUploaded} />
         )}
       </section>
 
@@ -131,7 +166,7 @@ export function HomeClient() {
             <button
               type="button"
               onClick={() => void runPipeline()}
-              disabled={pipelineBusy}
+              disabled={pipelineBusy || !resume}
               className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
             >
               {pipelineBusy ? "רץ…" : "הפעל סריקה + שליחה"}

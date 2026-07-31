@@ -47,79 +47,10 @@ def get_supabase(schema: str) -> Client:
 
 
 def sample_jobs() -> list[ScrapedJob]:
-    now = datetime.now(timezone.utc)
-    return [
-        ScrapedJob(
-            source="sample",
-            external_id="il-fe-001",
-            title="Frontend Engineer",
-            company="Example Labs",
-            location="Tel Aviv",
-            url="https://example.com/jobs/fe-001",
-            description="React, TypeScript, Next.js. Build product UI for Israeli startups.",
-            posted_at=now - timedelta(days=1),
-        ),
-        ScrapedJob(
-            source="sample",
-            external_id="il-be-002",
-            title="Backend Developer",
-            company="Negev Data",
-            location="Remote - Israel",
-            url="https://example.com/jobs/be-002",
-            description="Python, FastAPI, PostgreSQL, Supabase. APIs and data pipelines.",
-            posted_at=now - timedelta(days=2),
-        ),
-        ScrapedJob(
-            source="sample",
-            external_id="il-fs-003",
-            title="Full Stack Developer",
-            company="Coastline AI",
-            location="Haifa",
-            url="https://example.com/jobs/fs-003",
-            description="Node, React, Docker, AWS. End-to-end product ownership.",
-            posted_at=now - timedelta(hours=12),
-        ),
-        ScrapedJob(
-            source="sample",
-            external_id="il-devops-004",
-            title="DevOps Engineer",
-            company="Galilee Cloud",
-            location="Herzliya",
-            url="https://example.com/jobs/devops-004",
-            description="AWS, Docker, Kubernetes, CI/CD, Terraform. Israel on-site/hybrid.",
-            posted_at=now - timedelta(hours=8),
-        ),
-        ScrapedJob(
-            source="sample",
-            external_id="il-data-005",
-            title="Data Engineer",
-            company="Jerusalem Analytics",
-            location="Jerusalem",
-            url="https://example.com/jobs/data-005",
-            description="Python, SQL, Airflow, Spark. Build data pipelines in Israel.",
-            posted_at=now - timedelta(hours=6),
-        ),
-        ScrapedJob(
-            source="sample",
-            external_id="il-qa-006",
-            title="QA Automation Engineer",
-            company="Ramat Gan Soft",
-            location="Ramat Gan",
-            url="https://example.com/jobs/qa-006",
-            description="Playwright, Cypress, JavaScript, CI. Hybrid Tel Aviv area.",
-            posted_at=now - timedelta(hours=4),
-        ),
-        ScrapedJob(
-            source="sample",
-            external_id="il-mobile-008",
-            title="Mobile Developer (React Native)",
-            company="Beach Apps IL",
-            location="Tel Aviv",
-            url="https://example.com/jobs/mobile-008",
-            description="React Native, TypeScript, mobile CI. On-site Tel Aviv.",
-            posted_at=now - timedelta(hours=3),
-        ),
-    ]
+    """Large Israel catalog across AI / finance / product / management / boards."""
+    from israel_jobs_catalog import catalog_board_job_dicts
+
+    return [ScrapedJob(**row) for row in catalog_board_job_dicts()]
 
 
 def upsert_jobs(client: Client, jobs: list[ScrapedJob]) -> list[dict[str, Any]]:
@@ -149,6 +80,15 @@ def tokenize(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-zA-Z+#.\u0590-\u05FF]{2,}", text.lower()) if len(t) > 1}
 
 
+DOMAIN_TERMS = [
+    "ai", "ml", "llm", "machine learning", "product", "מוצר", "roadmap",
+    "finance", "פיננסי", "fp&a", "management", "ניהול", "operations",
+    "marketing", "שיווק", "growth", "sales", "מכירות", "customer success",
+    "python", "javascript", "typescript", "react", "sql", "excel", "agile",
+]
+DOMAIN_TAGS = {"ai", "product", "finance", "management", "marketing", "sales", "tech"}
+
+
 def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tuple[float, list[str]]:
     haystack = " ".join(
         filter(
@@ -156,6 +96,7 @@ def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tup
             [job.get("title"), job.get("description"), job.get("company"), job.get("location")],
         )
     ).lower()
+    resume_blob = f"{resume_text} {' '.join(skills)}".lower()
     resume_tokens = tokenize(resume_text)
     job_tokens = tokenize(haystack)
 
@@ -164,17 +105,34 @@ def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tup
     if skill_hits:
         reasons.append(f"skills: {', '.join(skill_hits[:5])}")
 
+    domain_hits = [t for t in DOMAIN_TERMS if t in resume_blob and t in haystack]
+    if domain_hits:
+        reasons.append(f"domain: {', '.join(domain_hits[:5])}")
+
+    skill_lower = {s.lower() for s in skills}
+    tag_hits = [t for t in DOMAIN_TAGS if (t in skill_lower or t in resume_blob) and t in haystack]
+    if tag_hits:
+        reasons.append(f"tags: {', '.join(tag_hits)}")
+
     overlap = resume_tokens & job_tokens
     if overlap:
         reasons.append(f"keywords: {', '.join(sorted(list(overlap))[:5])}")
 
-    skill_score = min(1.0, len(skill_hits) / 3)
-    overlap_score = min(1.0, len(overlap) / 10)
+    skill_score = min(1.0, len(skill_hits) / 2)
+    domain_score = min(1.0, (len(domain_hits) + len(tag_hits)) / 2)
+    overlap_score = min(1.0, len(overlap) / 8)
     title_tokens = tokenize(job.get("title") or "")
     title_score = min(1.0, len(resume_tokens & title_tokens) / 2)
-    score = round(0.55 * skill_score + 0.3 * overlap_score + 0.15 * title_score, 4)
-    if score == 0 and (skill_hits or len(overlap) >= 2):
-        score = 0.36
+    score = round(
+        0.35 * skill_score + 0.3 * domain_score + 0.2 * overlap_score + 0.15 * title_score,
+        4,
+    )
+    if score == 0 and (skill_hits or domain_hits or tag_hits or len(overlap) >= 2):
+        score = 0.28
+    if (len(domain_hits) >= 2 or tag_hits) and score < 0.32:
+        score = 0.32
+    if tag_hits and domain_hits and score < 0.38:
+        score = 0.38
     if not reasons:
         reasons.append("partial profile overlap" if score > 0 else "weak lexical overlap")
     return score, reasons
@@ -482,7 +440,7 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
 
 def run() -> None:
     schema = os.getenv("SUPABASE_SCHEMA", "job_agent")
-    min_score = float(os.getenv("MIN_MATCH_SCORE", "0.25"))
+    min_score = float(os.getenv("MIN_MATCH_SCORE", "0.2"))
     max_age_days = int(os.getenv("MAX_JOB_AGE_DAYS", "7"))
 
     from social_scrape import discover_social_jobs

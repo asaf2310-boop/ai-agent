@@ -85,61 +85,10 @@ def _parse_date(value: str | None) -> datetime | None:
 
 
 def sample_social_posts() -> list[ScrapedJob]:
-    """Representative IL social/freelance posts until live feeds return data."""
-    now = datetime.now(timezone.utc)
-    return [
-        ScrapedJob(
-            source="social-telegram",
-            external_id="tg-il-freelance-001",
-            title="פרילנס React — דף נחיתה לחברת סטארטאפ",
-            company="פוסט בקבוצת Telegram · Jobs IL",
-            location="Remote - Israel",
-            url="https://t.me/s/example_il_jobs/101",
-            description=(
-                "מחפשים פרילנסר/ית React+Tailwind לבניית דף נחיתה. "
-                "תקציב לפי פרויקט. שלחו תיק עבודות."
-            ),
-            posted_at=now,
-            apply_email=None,
-            post_kind="freelance",
-            channel="telegram",
-            is_social=True,
-        ),
-        ScrapedJob(
-            source="social-facebook",
-            external_id="fb-il-jobs-002",
-            title="דרוש/ה Full Stack לפרויקט קצר",
-            company="פוסט בפייסבוק · פרילנסרים ישראל",
-            location="תל אביב / היברידי",
-            url="https://www.facebook.com/groups/example.il.freelance/posts/2002",
-            description=(
-                "מגייסים לפרויקט 3–4 שבועות: Node, React, Postgres. "
-                "עצמאים בלבד. אפשר לשלוח קו״ח בפרטי."
-            ),
-            posted_at=now,
-            apply_email=None,
-            post_kind="social",
-            channel="facebook",
-            is_social=True,
-        ),
-        ScrapedJob(
-            source="social-linkedin",
-            external_id="li-il-contract-003",
-            title="Contract Backend Engineer (Python)",
-            company="פוסט ב-LinkedIn",
-            location="Israel / Remote",
-            url="https://www.linkedin.com/feed/update/urn:li:activity:example3003",
-            description=(
-                "Looking for a freelance Python/FastAPI engineer for a 2-month contract "
-                "with an Israeli product team. Supabase a plus."
-            ),
-            posted_at=now,
-            apply_email=None,
-            post_kind="freelance",
-            channel="linkedin",
-            is_social=True,
-        ),
-    ]
+    """LinkedIn-first IL social/freelance posts (+ Telegram/Facebook samples)."""
+    from israel_jobs_catalog import catalog_social_post_dicts
+
+    return [ScrapedJob(**row) for row in catalog_social_post_dicts()]
 
 
 def fetch_remoteok(limit: int = 25) -> list[ScrapedJob]:

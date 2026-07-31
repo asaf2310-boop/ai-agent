@@ -32,12 +32,52 @@ const KNOWN_SKILLS = [
   "ci/cd",
   "agile",
   "scrum",
+  "excel",
+  "powerpoint",
+  "salesforce",
+  "hubspot",
+  "figma",
+  "jira",
+  "notion",
+  "tableau",
+  "power bi",
+  "pytorch",
+  "tensorflow",
+  "langchain",
+  "openai",
+  "llm",
+  "machine learning",
+  "product management",
+  "product owner",
+  "roadmap",
+  "fp&a",
+  "ifrs",
+  "sap",
+  "priority",
 ];
 
 export function extractSkills(text: string): string[] {
   const lower = text.toLowerCase();
-  const found = KNOWN_SKILLS.filter((skill) => lower.includes(skill));
-  return [...new Set(found.map((s) => (s === "nextjs" ? "next.js" : s === "nodejs" ? "node" : s === "postgresql" ? "postgres" : s)))];
+  const found = KNOWN_SKILLS.filter((skill) => lower.includes(skill.trim()));
+  // Also mark domain tags for matching
+  const domains: string[] = [];
+  if (/ai|llm|machine learning|בינה מלאכותית|אלגוריתם/i.test(text)) domains.push("ai");
+  if (/product|מוצר|roadmap|product manager/i.test(text)) domains.push("product");
+  if (/finance|פיננס|חשב|תקציב|fp&a|אשראי|fintech/i.test(text)) domains.push("finance");
+  if (/ניהול|manager|operations|תפעול|team lead|מנהל/i.test(text)) domains.push("management");
+  return [
+    ...new Set(
+      [...found, ...domains].map((s) =>
+        s === "nextjs"
+          ? "next.js"
+          : s === "nodejs"
+            ? "node"
+            : s === "postgresql"
+              ? "postgres"
+              : s.trim(),
+      ),
+    ),
+  ];
 }
 
 export async function extractResumeText(

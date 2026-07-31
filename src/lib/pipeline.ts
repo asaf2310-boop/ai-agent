@@ -1,3 +1,4 @@
+import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
 import { isIsraelLocation } from "@/lib/israel";
 import { scoreMatch } from "@/lib/matching";
 import { tailorResumeForJob } from "@/lib/openai";
@@ -8,159 +9,13 @@ type DbClient = {
   from: (table: string) => any;
 };
 
-export const SAMPLE_JOBS = [
-  {
-    source: "sample",
-    external_id: "il-fe-001",
-    title: "Frontend Engineer",
-    company: "Example Labs",
-    location: "Tel Aviv",
-    url: "https://example.com/jobs/fe-001",
-    apply_email: null as string | null,
-    description:
-      "React, TypeScript, Next.js. Build product UI for Israeli startups.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-be-002",
-    title: "Backend Developer",
-    company: "Negev Data",
-    location: "Remote - Israel",
-    url: "https://example.com/jobs/be-002",
-    apply_email: null as string | null,
-    description:
-      "Python, FastAPI, PostgreSQL, Supabase. APIs and data pipelines.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-fs-003",
-    title: "Full Stack Developer",
-    company: "Coastline AI",
-    location: "Haifa",
-    url: "https://example.com/jobs/fs-003",
-    apply_email: null as string | null,
-    description: "Node, React, Docker, AWS. End-to-end product ownership.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-devops-004",
-    title: "DevOps Engineer",
-    company: "Galilee Cloud",
-    location: "Herzliya",
-    url: "https://example.com/jobs/devops-004",
-    apply_email: null as string | null,
-    description: "AWS, Docker, Kubernetes, CI/CD, Terraform. Israel on-site/hybrid.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-data-005",
-    title: "Data Engineer",
-    company: "Jerusalem Analytics",
-    location: "Jerusalem",
-    url: "https://example.com/jobs/data-005",
-    apply_email: null as string | null,
-    description: "Python, SQL, Airflow, Spark. Build data pipelines in Israel.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-qa-006",
-    title: "QA Automation Engineer",
-    company: "Ramat Gan Soft",
-    location: "Ramat Gan",
-    url: "https://example.com/jobs/qa-006",
-    apply_email: null as string | null,
-    description: "Playwright, Cypress, JavaScript, CI. Hybrid Tel Aviv area.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-pm-007",
-    title: "Product Manager — B2B SaaS",
-    company: "Startup Nation Hub",
-    location: "Tel Aviv",
-    url: "https://example.com/jobs/pm-007",
-    apply_email: null as string | null,
-    description: "Product ownership for Israeli B2B SaaS. Hebrew + English.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-  {
-    source: "sample",
-    external_id: "il-mobile-008",
-    title: "Mobile Developer (React Native)",
-    company: "Beach Apps IL",
-    location: "Tel Aviv",
-    url: "https://example.com/jobs/mobile-008",
-    apply_email: null as string | null,
-    description: "React Native, TypeScript, mobile CI. On-site Tel Aviv.",
-    post_kind: "job" as const,
-    channel: null as string | null,
-    is_social: false,
-  },
-];
+export const SAMPLE_JOBS = ISRAEL_JOB_CATALOG.filter((j) => !j.is_social).map(
+  ({ domain: _d, ...job }) => job,
+);
 
-export const SAMPLE_SOCIAL_POSTS = [
-  {
-    source: "social-telegram",
-    external_id: "tg-il-freelance-001",
-    title: "פרילנס React — דף נחיתה לחברת סטארטאפ",
-    company: "פוסט בקבוצת Telegram · Jobs IL",
-    location: "Remote - Israel",
-    url: "https://t.me/s/example_il_jobs/101",
-    apply_email: null as string | null,
-    description:
-      "מחפשים פרילנסר/ית React+Tailwind לבניית דף נחיתה. תקציב לפי פרויקט. שלחו תיק עבודות.",
-    post_kind: "freelance" as const,
-    channel: "telegram",
-    is_social: true,
-  },
-  {
-    source: "social-facebook",
-    external_id: "fb-il-jobs-002",
-    title: "דרוש/ה Full Stack לפרויקט קצר",
-    company: "פוסט בפייסבוק · פרילנסרים ישראל",
-    location: "תל אביב / היברידי",
-    url: "https://www.facebook.com/groups/example.il.freelance/posts/2002",
-    apply_email: null as string | null,
-    description:
-      "מגייסים לפרויקט 3–4 שבועות: Node, React, Postgres. עצמאים בלבד. אפשר לשלוח קו״ח בפרטי.",
-    post_kind: "social" as const,
-    channel: "facebook",
-    is_social: true,
-  },
-  {
-    source: "social-linkedin",
-    external_id: "li-il-contract-003",
-    title: "Contract Backend Engineer (Python)",
-    company: "פוסט ב-LinkedIn",
-    location: "Israel / Remote",
-    url: "https://www.linkedin.com/feed/update/urn:li:activity:example3003",
-    apply_email: null as string | null,
-    description:
-      "Looking for a freelance Python/FastAPI engineer for a 2-month contract with an Israeli product team. Supabase a plus.",
-    post_kind: "freelance" as const,
-    channel: "linkedin",
-    is_social: true,
-  },
-];
+export const SAMPLE_SOCIAL_POSTS = ISRAEL_JOB_CATALOG.filter((j) => j.is_social).map(
+  ({ domain: _d, ...job }) => job,
+);
 
 async function upsertJobBatch(
   supabase: DbClient,
@@ -330,7 +185,7 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
 export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
-  minScore = Number(process.env.MIN_MATCH_SCORE || "0.25"),
+  minScore = Number(process.env.MIN_MATCH_SCORE || "0.2"),
   userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =

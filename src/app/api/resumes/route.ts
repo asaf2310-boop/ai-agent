@@ -13,6 +13,44 @@ import type { Resume } from "@/lib/types";
 const BUCKET =
   process.env.NEXT_PUBLIC_SUPABASE_RESUME_BUCKET || "job-agent-resumes";
 
+/** Load saved resume for the logged-in user (no re-upload). */
+export async function GET() {
+  try {
+    const { user, response } = await requireUser();
+    if (!user || response) return response!;
+
+    const supabase = createAdminClient();
+
+    const { data: active } = await supabase
+      .from("resumes")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (active?.[0]) {
+      return NextResponse.json({ resume: active[0] });
+    }
+
+    const { data: latest, error } = await supabase
+      .from("resumes")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ resume: latest?.[0] ?? null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to load resume";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const { user, response } = await requireUser();
@@ -39,7 +77,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unsupported file type" }, { status: 400 });
     }
 
-    // Max 8MB
     if (file.size > 8 * 1024 * 1024) {
       return NextResponse.json({ error: "File too large (max 8MB)" }, { status: 400 });
     }
@@ -89,7 +126,6 @@ export async function POST(request: Request) {
       .single();
 
     if (error && /is_active|user_id/i.test(error.message)) {
-      // Progressive fallbacks for older schemas
       if (/user_id/i.test(error.message)) delete insertPayload.user_id;
       if (/is_active/i.test(error.message)) delete insertPayload.is_active;
       ({ data, error } = await supabase
