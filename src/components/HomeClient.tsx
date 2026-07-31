@@ -223,14 +223,22 @@ export function HomeClient({ email }: { email?: string | null }) {
         });
         const json = await res.json();
         if (res.ok && json.ok) {
-          // Stay on pool at the same scroll position — don't jump to history
-          // or flash the full-list loading state.
+          // Remove from pool → mark sent → show in history
           setMatches((prev) =>
             prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
           );
-          setMessage(json.detail || "הוגש אוטומטית ✓ — נשארת בפול");
-          void loadApplications(resume?.id, { quiet: true });
+          if (json.application) {
+            setApplications((prev) => {
+              const rest = prev.filter(
+                (a) => a.job_id !== jobId && a.id !== json.application.id,
+              );
+              return [json.application, ...rest];
+            });
+          }
+          await loadApplications(resume?.id, { quiet: true });
           void loadMatches(resume?.id, { quiet: true });
+          setMessage(json.detail || "נשלח ✓ — המשרה עברה להיסטוריה");
+          setTab("history");
           return;
         }
 
