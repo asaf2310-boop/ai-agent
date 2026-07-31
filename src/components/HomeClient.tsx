@@ -52,38 +52,45 @@ export function HomeClient({ email }: { email?: string | null }) {
     [matches.length],
   );
 
-  const loadMatches = useCallback(async (resumeId?: string) => {
-    setLoadingMatches(true);
-    try {
-      const qs = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : "";
-      const res = await fetch(`/api/matches${qs}`);
-      const json = await res.json();
-      if (res.ok) {
-        setMatches(json.matches ?? []);
-      } else {
-        setMessage(json.error || "טעינת התאמות נכשלה");
+  const loadMatches = useCallback(
+    async (resumeId?: string, opts?: { quiet?: boolean }) => {
+      // quiet: refresh list without unmounting MatchList (keeps scroll position)
+      if (!opts?.quiet) setLoadingMatches(true);
+      try {
+        const qs = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : "";
+        const res = await fetch(`/api/matches${qs}`);
+        const json = await res.json();
+        if (res.ok) {
+          setMatches(json.matches ?? []);
+        } else if (!opts?.quiet) {
+          setMessage(json.error || "טעינת התאמות נכשלה");
+        }
+      } catch {
+        if (!opts?.quiet) setMessage("טעינת התאמות נכשלה");
+      } finally {
+        if (!opts?.quiet) setLoadingMatches(false);
       }
-    } catch {
-      setMessage("טעינת התאמות נכשלה");
-    } finally {
-      setLoadingMatches(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
-  const loadApplications = useCallback(async (resumeId?: string) => {
-    setLoadingApps(true);
-    try {
-      const qs = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : "";
-      const res = await fetch(`/api/applications${qs}`);
-      const json = await res.json();
-      if (res.ok) {
-        setApplications(json.applications ?? []);
-        setSummary(json.summary);
+  const loadApplications = useCallback(
+    async (resumeId?: string, opts?: { quiet?: boolean }) => {
+      if (!opts?.quiet) setLoadingApps(true);
+      try {
+        const qs = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : "";
+        const res = await fetch(`/api/applications${qs}`);
+        const json = await res.json();
+        if (res.ok) {
+          setApplications(json.applications ?? []);
+          setSummary(json.summary);
+        }
+      } finally {
+        if (!opts?.quiet) setLoadingApps(false);
       }
-    } finally {
-      setLoadingApps(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const loadSavedResume = useCallback(async () => {
     setLoadingResume(true);
@@ -128,9 +135,12 @@ export function HomeClient({ email }: { email?: string | null }) {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "סימון נכשל");
 
+        setMatches((prev) =>
+          prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
+        );
         await Promise.all([
-          loadMatches(resume?.id),
-          loadApplications(resume?.id),
+          loadMatches(resume?.id, { quiet: true }),
+          loadApplications(resume?.id, { quiet: true }),
         ]);
         setMessage("המשרה הוסרה מהפול ועברה להיסטוריה");
       } catch (err) {
@@ -213,12 +223,14 @@ export function HomeClient({ email }: { email?: string | null }) {
         });
         const json = await res.json();
         if (res.ok && json.ok) {
-          setMessage(json.detail || "הוגש אוטומטית בטופס האתר ✓");
-          await Promise.all([
-            loadMatches(resume?.id),
-            loadApplications(resume?.id),
-          ]);
-          setTab("history");
+          // Stay on pool at the same scroll position — don't jump to history
+          // or flash the full-list loading state.
+          setMatches((prev) =>
+            prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
+          );
+          setMessage(json.detail || "הוגש אוטומטית ✓ — נשארת בפול");
+          void loadApplications(resume?.id, { quiet: true });
+          void loadMatches(resume?.id, { quiet: true });
           return;
         }
 
@@ -227,7 +239,6 @@ export function HomeClient({ email }: { email?: string | null }) {
           json.error ||
             "אין אפשרות להגשה אוטומטית למשרה הזו (חסר מייל מעסיק או טופס ATS).",
         );
-        await loadMatches(resume?.id);
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");
       } finally {
