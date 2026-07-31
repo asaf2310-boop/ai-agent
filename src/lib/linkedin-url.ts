@@ -145,3 +145,46 @@ export function safeJobOpenUrl(job: {
   if (url.startsWith("/")) return null;
   return url;
 }
+
+/**
+ * Job belongs in the pool only if the user can open a real posting
+ * (not catalog demos, null Telegram, or LinkedIn keyword search).
+ */
+export function hasActiveJobLink(job: {
+  url?: string | null;
+  title?: string | null;
+  source?: string | null;
+  channel?: string | null;
+  external_id?: string | null;
+} | null | undefined): boolean {
+  if (!job) return false;
+  const raw = (job.url || "").trim();
+  if (!raw || !/^https?:\/\//i.test(raw)) return false;
+  // Catalog fake IL board search pages
+  if (/[?&]ref=ai-agent\b/i.test(raw) || /\/search\?ref=ai-agent/i.test(raw)) {
+    return false;
+  }
+  if (isBrokenLinkedInUrl(raw)) return false;
+  // Keyword search is not a specific job posting
+  if (/linkedin\.com\/jobs\/search/i.test(raw)) return false;
+  if (
+    /t\.me\/(?:s\/)?(?:example[_-]?i[lt]?[_-]?jobs|israel_jobs|example)(?:\/|$|\?)/i.test(
+      raw,
+    ) ||
+    /t\.me\/[^/]+\/(?:tg-|li-f-|fb-)/i.test(raw) ||
+    /facebook\.com\/(?:groups\/)?example(?:\.il)?(?:\.freelance)?/i.test(raw)
+  ) {
+    return false;
+  }
+  // Real LinkedIn job view
+  if (/linkedin\.com\/jobs\/view\/(\d+)/i.test(raw)) return true;
+  if (/linkedin\.com/i.test(raw)) {
+    // Only accept if normalize keeps a view URL (not search fallback)
+    const open = normalizeLinkedInOpenUrl(raw, {
+      title: job.title,
+      externalId: job.external_id,
+    });
+    return Boolean(open && /linkedin\.com\/jobs\/view\/\d+/i.test(open));
+  }
+  return true;
+}

@@ -268,7 +268,10 @@ export function HomeClient({ email }: { email?: string | null }) {
         loadApplications(json.resume?.id || resume?.id),
       ]);
       setMessage(
-        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
+        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש אוטומטית: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}` +
+          ((json.sentCount ?? 0) === 0
+            ? " — אין מייל/טופס ATS במשרות הנוכחיות; בפול רק משרות עם קישור פעיל להגשה ידנית"
+            : ""),
       );
       setTab("pool");
     } catch (err) {
@@ -378,7 +381,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  עד 50 · שליחת מייל/ATS רצה בסריקה · כפתור הגשה רק כשיש טופס אמיתי
+                  רק משרות עם קישור פעיל · שליחה אוטומטית בסריקה כשאפשר
                 </p>
               </div>
               <div className="flex gap-2">

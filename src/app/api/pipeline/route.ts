@@ -8,6 +8,7 @@ import {
 } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { POOL_LIMIT, sortMatchesByNewest } from "@/lib/match-pool";
+import { hasActiveJobLink } from "@/lib/linkedin-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
@@ -151,7 +152,9 @@ export async function POST(request: Request) {
     }
 
     const poolMatches = sortMatchesByNewest(
-      matches.filter((m) => !clearedJobIds.has(m.job_id)),
+      matches.filter(
+        (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
+      ),
     ).slice(0, POOL_LIMIT);
 
     const historyApps = appRows.filter((a) => isHistoryEntry(a));
