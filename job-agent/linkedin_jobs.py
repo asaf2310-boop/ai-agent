@@ -184,7 +184,13 @@ def fetch_linkedin_israel_jobs(max_jobs: int = 80, enrich: int = 20) -> list[Scr
                     job.description = desc
                     emails = EMAIL_RE.findall(desc)
                     if emails:
-                        job.apply_email = emails[0].lower()
+                        # Strip RTL/ZW marks that break Resend `to` validation
+                        raw = re.sub(
+                            r"[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]",
+                            "",
+                            emails[0],
+                        )
+                        job.apply_email = raw.lower()
     except Exception:  # noqa: BLE001
         return list(by_id.values())
 
