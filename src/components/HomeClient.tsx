@@ -35,6 +35,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [autoApplyBusyId, setAutoApplyBusyId] = useState<string | null>(null);
+  const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [autofillJob, setAutofillJob] = useState<{
     jobId?: string;
@@ -134,6 +135,37 @@ export function HomeClient({ email }: { email?: string | null }) {
         setMessage("המשרה הוסרה מהפול ועברה להיסטוריה");
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הסרה מהפול נכשלה");
+      }
+    },
+    [resume, loadMatches, loadApplications],
+  );
+
+  const restoreToPool = useCallback(
+    async (app: Application) => {
+      setRestoreBusyId(app.id);
+      setMessage(null);
+      try {
+        const res = await fetch("/api/applications/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            applicationId: app.id,
+            jobId: app.job_id,
+            resumeId: resume?.id || app.resume_id,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "החזרה לפול נכשלה");
+        await Promise.all([
+          loadMatches(resume?.id),
+          loadApplications(resume?.id),
+        ]);
+        setMessage("המשרה חזרה לפול ✓");
+        setTab("pool");
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "החזרה לפול נכשלה");
+      } finally {
+        setRestoreBusyId(null);
       }
     },
     [resume, loadMatches, loadApplications],
@@ -406,7 +438,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">היסטוריה</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  מייל מעסיק · הגשה באתר · פתיחת קישור
+                  מייל/הגשה באתר · הוסרה מהפול (אפשר להחזיר)
                 </p>
             </div>
             <ApplicationReport
@@ -414,6 +446,8 @@ export function HomeClient({ email }: { email?: string | null }) {
               loading={loadingApps}
               resume={resume}
               summary={summary}
+              onRestoreToPool={(app) => void restoreToPool(app)}
+              restoreBusyId={restoreBusyId}
             />
           </section>
         )}

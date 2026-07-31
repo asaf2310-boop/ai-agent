@@ -22,7 +22,8 @@ type Props = {
     skipped: number;
     failed: number;
   };
-  onOpenJobLink?: (jobId: string) => void;
+  onRestoreToPool?: (app: Application) => void;
+  restoreBusyId?: string | null;
 };
 
 function statusLabel(app: Application): string {
@@ -37,15 +38,18 @@ function statusLabel(app: Application): string {
 function ApplicationCard({
   app,
   resume,
-  onOpenJobLink,
+  onRestoreToPool,
+  restoreBusyId,
 }: {
   app: Application;
   resume?: Resume | null;
-  onOpenJobLink?: (jobId: string) => void;
+  onRestoreToPool?: (app: Application) => void;
+  restoreBusyId?: string | null;
 }) {
   const job = app.jobs;
   const sent = wasSentToRealEmployer(app);
   const webForm = app.status === "sent" && app.method === "web-form";
+  const dismissed = wasLinkOpened(app);
   const employerEmail = sent && !webForm ? job?.apply_email : null;
   const openUrl = safeJobOpenUrl({
     url: job?.url,
@@ -54,6 +58,11 @@ function ApplicationCard({
     channel: job?.channel,
     external_id: job?.external_id,
   });
+  const isSocialDemo =
+    !openUrl &&
+    /telegram|facebook|social/i.test(
+      `${job?.channel || ""} ${job?.source || ""}`,
+    );
 
   return (
     <li className="space-y-2 py-4">
@@ -65,9 +74,6 @@ function ApplicationCard({
               target="_blank"
               rel="noreferrer"
               className="hover:text-[var(--accent)]"
-              onClick={() => {
-                if (job?.id) onOpenJobLink?.(job.id);
-              }}
             >
               {job?.title}
               {job?.company ? ` · ${job.company}` : ""}
@@ -86,6 +92,12 @@ function ApplicationCard({
       <p className="text-xs text-[var(--muted)]">
         {[job?.location, job?.channel || job?.source].filter(Boolean).join(" · ")}
       </p>
+      {dismissed && (
+        <p className="text-sm text-[var(--foreground)]/85">
+          {app.skip_reason ||
+            "הוסר מהפול (לחיצה על ״הסר מהפול״, או גרסה ישנה שסימנה פתיחת קישור)."}
+        </p>
+      )}
       {webForm && (
         <p className="text-sm text-[var(--foreground)]/85">
           הוגש אוטומטית בטופס ההגשה באתר המעסיק
@@ -109,21 +121,33 @@ function ApplicationCard({
           {app.recruiter_insights}
         </p>
       )}
-      {openUrl && (
-        <p className="text-sm">
+      <div className="flex flex-wrap gap-2 pt-1">
+        {openUrl && (
           <a
             href={openUrl}
             target="_blank"
             rel="noreferrer"
-            className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
-            onClick={() => {
-              if (job?.id) onOpenJobLink?.(job.id);
-            }}
+            className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
           >
-            פתח טופס הגשה באתר ↗
+            פתח משרה ↗
           </a>
-        </p>
-      )}
+        )}
+        {isSocialDemo && (
+          <span className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)]">
+            אין קישור אמיתי לפוסט (דמו טלגרם/פייסבוק)
+          </span>
+        )}
+        {dismissed && (
+          <button
+            type="button"
+            onClick={() => onRestoreToPool?.(app)}
+            disabled={restoreBusyId === app.id}
+            className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+          >
+            {restoreBusyId === app.id ? "מחזיר…" : "החזר לפול"}
+          </button>
+        )}
+      </div>
 
       {resume && (
         <details className="text-sm">
@@ -162,11 +186,13 @@ function ApplicationCard({
 function AppList({
   apps,
   resume,
-  onOpenJobLink,
+  onRestoreToPool,
+  restoreBusyId,
 }: {
   apps: Application[];
   resume?: Resume | null;
-  onOpenJobLink?: (jobId: string) => void;
+  onRestoreToPool?: (app: Application) => void;
+  restoreBusyId?: string | null;
 }) {
   return (
     <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
@@ -175,7 +201,8 @@ function AppList({
           key={app.id}
           app={app}
           resume={resume}
-          onOpenJobLink={onOpenJobLink}
+          onRestoreToPool={onRestoreToPool}
+          restoreBusyId={restoreBusyId}
         />
       ))}
     </ul>
@@ -187,7 +214,8 @@ export function ApplicationReport({
   loading,
   resume,
   summary,
-  onOpenJobLink,
+  onRestoreToPool,
+  restoreBusyId = null,
 }: Props) {
   if (loading) {
     return <p className="text-sm text-[var(--muted)]">טוען דוח…</p>;
@@ -209,7 +237,7 @@ export function ApplicationReport({
           נשלח/הוגש: {sentCount}
         </span>
         <span className="font-medium text-[var(--accent)]">
-          נפתח: {openedCount}
+          הוסר: {openedCount}
         </span>
       </div>
 
@@ -233,7 +261,8 @@ export function ApplicationReport({
               <AppList
                 apps={sentApps}
                 resume={resume}
-                onOpenJobLink={onOpenJobLink}
+                onRestoreToPool={onRestoreToPool}
+                restoreBusyId={restoreBusyId}
               />
             )}
           </section>
@@ -244,13 +273,15 @@ export function ApplicationReport({
             </h3>
             {openedApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                משרות שהוסרו מהפול ידנית (״הסר מהפול״).
+                משרות שהוסרו מהפול ידנית (״הסר מהפול״). אפשר להחזיר עם ״החזר
+                לפול״.
               </p>
             ) : (
               <AppList
                 apps={openedApps}
                 resume={resume}
-                onOpenJobLink={onOpenJobLink}
+                onRestoreToPool={onRestoreToPool}
+                restoreBusyId={restoreBusyId}
               />
             )}
           </section>
