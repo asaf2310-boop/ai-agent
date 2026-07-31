@@ -6,6 +6,7 @@ export type Resume = {
   skills: string[];
   created_at: string;
   is_active?: boolean;
+  user_id?: string | null;
 };
 
 export type Job = {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
@@ -14,6 +15,9 @@ const BUCKET =
 
 export async function POST(request: Request) {
   try {
+    const { user, response } = await requireUser();
+    if (!user || response) return response!;
+
     const form = await request.formData();
     const file = form.get("file");
 
@@ -35,10 +39,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unsupported file type" }, { status: 400 });
     }
 
+    // Max 8MB
+    if (file.size > 8 * 1024 * 1024) {
+      return NextResponse.json({ error: "File too large (max 8MB)" }, { status: 400 });
+    }
+
     const supabase = createAdminClient();
     const bytes = Buffer.from(await file.arrayBuffer());
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storagePath = `${Date.now()}-${safeName}`;
+    const storagePath = `${user.id}/${Date.now()}-${safeName}`;
 
     const { error: uploadError } = await supabase.storage
       .from(BUCKET)
@@ -58,8 +67,11 @@ export async function POST(request: Request) {
     );
     const skills = extractedText ? extractSkills(extractedText) : [];
 
-    // Mark previous resumes inactive (column added in migration 002)
-    await supabase.from("resumes").update({ is_active: false }).eq("is_active", true);
+    await supabase
+      .from("resumes")
+      .update({ is_active: false })
+      .eq("user_id", user.id)
+      .eq("is_active", true);
 
     const insertPayload: Record<string, unknown> = {
       filename: file.name,
@@ -67,6 +79,7 @@ export async function POST(request: Request) {
       extracted_text: extractedText,
       skills,
       is_active: true,
+      user_id: user.id,
     };
 
     let { data, error } = await supabase
@@ -75,9 +88,10 @@ export async function POST(request: Request) {
       .select()
       .single();
 
-    // Fallback if migration 002 not applied yet
-    if (error && /is_active/i.test(error.message)) {
-      delete insertPayload.is_active;
+    if (error && /is_active|user_id/i.test(error.message)) {
+      // Progressive fallbacks for older schemas
+      if (/user_id/i.test(error.message)) delete insertPayload.user_id;
+      if (/is_active/i.test(error.message)) delete insertPayload.is_active;
       ({ data, error } = await supabase
         .from("resumes")
         .insert(insertPayload)
@@ -93,11 +107,12 @@ export async function POST(request: Request) {
 
     await ensureSampleJobs(supabase);
     await syncLiveSocialJobs(supabase);
-    const matches = await matchResumeToJobs(supabase, resume);
+    const matches = await matchResumeToJobs(supabase, resume, undefined, user.id);
     const applications = await processApplicationsForResume(
       supabase,
       resume,
       matches,
+      user.id,
     );
 
     return NextResponse.json({

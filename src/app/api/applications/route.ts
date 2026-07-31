@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
   try {
+    const { user, response } = await requireUser();
+    if (!user || response) return response!;
+
     const { searchParams } = new URL(request.url);
     const resumeId = searchParams.get("resumeId");
     const supabase = createAdminClient();
@@ -10,6 +14,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from("applications")
       .select("*, jobs(*)")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -19,6 +24,13 @@ export async function GET(request: Request) {
 
     const { data, error } = await query;
     if (error) {
+      if (/user_id/i.test(error.message)) {
+        return NextResponse.json({
+          applications: [],
+          summary: { total: 0, sent: 0, prepared: 0, skipped: 0, failed: 0 },
+          warning: "Run SQL migration 004_security_rls_auth.sql",
+        });
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 

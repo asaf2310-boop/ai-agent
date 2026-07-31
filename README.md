@@ -13,46 +13,55 @@ Next.js on Vercel, Supabase for data/storage, GitHub Actions for twice-daily ref
 
 ## Setup
 
-### 1. Supabase
+### 1. Supabase SQL
 
-Run migrations in the SQL Editor:
+Run migrations in order:
 
-1. `supabase/migrations/001_job_agent_schema.sql`
-2. `supabase/migrations/002_applications_and_tailoring.sql`
-3. `supabase/migrations/003_social_freelance_posts.sql`
+1. `001_job_agent_schema.sql`
+2. `002_applications_and_tailoring.sql`
+3. `003_social_freelance_posts.sql`
+4. `004_security_rls_auth.sql` ← **locks data; required**
 
-Then **Settings → API → Exposed schemas** — add `job_agent`.
+**Settings → API → Exposed schemas** — add `job_agent`.
 
-### 2. Local Next.js
+### 2. Google / Gmail login
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials → Create OAuth client (Web).
+2. Authorized redirect URI:
+   `https://<PROJECT_REF>.supabase.co/auth/v1/callback`
+3. Supabase → **Authentication → Providers → Google** → enable, paste Client ID + Secret.
+4. Supabase → **Authentication → URL Configuration**:
+   - Site URL: your Vercel URL (e.g. `https://ai-agent-tan-five.vercel.app`)
+   - Redirect URLs: `https://YOUR_VERCEL_URL/auth/callback` and `http://localhost:3000/auth/callback`
+
+### 3. Local / Vercel env
 
 ```bash
 cp .env.example .env.local
-npm install
-npm run dev
 ```
 
-### 3. Vercel env
+Required:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_SUPABASE_SCHEMA=job_agent`
-- `NEXT_PUBLIC_SUPABASE_RESUME_BUCKET=job-agent-resumes`
-- `GROQ_API_KEY` (optional free AI rewrite) or nothing — **local rewrite works without any LLM key**
-- `RESEND_API_KEY` + `APPLICATION_NOTIFY_EMAIL` (real outbound sends)
-- `APPLICATION_FROM_EMAIL` (optional)
-- `OPENAI_API_KEY` is **not required** (often paid / rate-limited)
+- `SUPABASE_SERVICE_ROLE_KEY` (**server only** — never expose to the browser)
 
-### 4. GitHub Actions secrets
+Optional: `GROQ_API_KEY`, `RESEND_API_KEY`, `APPLICATION_NOTIFY_EMAIL`, `SOCIAL_RSS_URLS`
 
-Same as above (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, optional `GROQ_API_KEY`, `RESEND_API_KEY`, `APPLICATION_NOTIFY_EMAIL`, `APPLICATION_FROM_EMAIL`).
+## Security model
+
+| Layer | Protection |
+|-------|------------|
+| Anon role | **No** table access to `job_agent` after migration 004 |
+| RLS | Users only read/write rows where `user_id = auth.uid()` |
+| Jobs catalog | Authenticated read-only; writes via service role (Actions) |
+| Storage | Private bucket; path must be `{user_id}/...` |
+| App routes | Middleware requires login; APIs return 401 without session |
+| Service role | Used only on the server / Actions — never `NEXT_PUBLIC_` |
 
 ## Flow
 
-1. Upload CV → extract text (DOCX/PDF/TXT) → store in Supabase.
-2. Seed jobs + social/freelance posts (RemoteOK + samples; optional RSS via `SOCIAL_RSS_URLS`).
-3. Score matches → rewrite CV → email apply / **link-alert** for social posts.
-4. UI shows matches with “פתח פוסט” links + application report.
-5. Actions runs ~08:00 and ~20:00 Israel time.
-
-Without Resend, applications stay **prepared** (tailored CV saved in the report) instead of emailed.
+1. Sign in with Gmail.
+2. Upload CV → owned by your user id.
+3. Match / tailor / apply scoped to your data.
+4. Actions scan twice daily using service role.

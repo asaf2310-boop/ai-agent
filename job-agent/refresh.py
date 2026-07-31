@@ -167,6 +167,7 @@ def refresh_matches(client: Client, min_score: float, max_age_days: int) -> list
                     "job_id": job["id"],
                     "score": score,
                     "reasons": reasons,
+                    **({"user_id": resume["user_id"]} if resume.get("user_id") else {}),
                 }
             )
         if not rows:
@@ -431,6 +432,7 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
                 "tailored_cv_text": tailored,
                 "error": error,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
+                **({"user_id": resume["user_id"]} if resume.get("user_id") else {}),
             },
             on_conflict="resume_id,job_id",
         ).execute()

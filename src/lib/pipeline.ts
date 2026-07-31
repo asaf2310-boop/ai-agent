@@ -212,6 +212,7 @@ export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
   minScore = Number(process.env.MIN_MATCH_SCORE || "0.3"),
+  userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || resume.filename;
@@ -219,6 +220,7 @@ export async function matchResumeToJobs(
   const { data: jobs, error } = await supabase.from("jobs").select("*");
   if (error) throw new Error(error.message);
 
+  const ownerId = userId || resume.user_id;
   const matchRows = [];
   for (const job of (jobs || []) as Job[]) {
     const { score, reasons } = scoreMatch(resumeText, resume.skills || [], job);
@@ -228,6 +230,7 @@ export async function matchResumeToJobs(
       job_id: job.id,
       score,
       reasons,
+      ...(ownerId ? { user_id: ownerId } : {}),
     });
   }
 
@@ -280,10 +283,12 @@ export async function processApplicationsForResume(
   supabase: DbClient,
   resume: Resume,
   matches: JobMatch[],
+  userId?: string,
 ) {
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || "";
   const notifyEmail = process.env.APPLICATION_NOTIFY_EMAIL;
+  const ownerId = userId || resume.user_id;
   const results = [];
 
   for (const match of matches) {
@@ -387,6 +392,7 @@ export async function processApplicationsForResume(
       tailored_cv_text: tailored.tailoredCv,
       error,
       updated_at: new Date().toISOString(),
+      ...(ownerId ? { user_id: ownerId } : {}),
     };
 
     const { data, error: upsertError } = await supabase

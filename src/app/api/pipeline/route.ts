@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
@@ -10,6 +11,9 @@ import type { Resume } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
+    const { user, response } = await requireUser();
+    if (!user || response) return response!;
+
     const body = (await request.json().catch(() => ({}))) as {
       resumeId?: string;
     };
@@ -21,6 +25,7 @@ export async function POST(request: Request) {
     let resumeQuery = supabase
       .from("resumes")
       .select("*")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -28,12 +33,14 @@ export async function POST(request: Request) {
       resumeQuery = supabase
         .from("resumes")
         .select("*")
+        .eq("user_id", user.id)
         .eq("id", body.resumeId)
         .limit(1);
     } else {
       resumeQuery = supabase
         .from("resumes")
         .select("*")
+        .eq("user_id", user.id)
         .eq("is_active", true)
         .order("created_at", { ascending: false })
         .limit(1);
@@ -52,11 +59,22 @@ export async function POST(request: Request) {
       );
     }
 
-    const matches = await matchResumeToJobs(supabase, resume);
+    // Ownership check
+    if (resume.user_id && resume.user_id !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const matches = await matchResumeToJobs(
+      supabase,
+      resume,
+      undefined,
+      user.id,
+    );
     const applications = await processApplicationsForResume(
       supabase,
       resume,
       matches,
+      user.id,
     );
 
     return NextResponse.json({
