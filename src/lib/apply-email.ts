@@ -1,9 +1,16 @@
 /** Resolve recruiter apply email from job fields or free text. */
-const EMAIL_RE =
+
+/** Strict address Resend accepts as bare `email@domain.tld`. */
+const STRICT_EMAIL_RE =
+  /^[a-z0-9](?:[a-z0-9._%+-]*[a-z0-9])?@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+
+/** Looser finder for digging addresses out of free text. */
+const EMAIL_FIND_RE =
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-/** Bidirectional / zero-width marks that break Resend's `to` validation. */
-const INVISIBLE_RE = /[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+/** Bidirectional / zero-width / odd spaces that break Resend's `to` validation. */
+const INVISIBLE_RE =
+  /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g;
 
 const BLOCKED_DOMAINS = new Set([
   "example.com",
@@ -23,6 +30,36 @@ export function scrubEmailText(text: string | null | undefined): string {
 }
 
 /**
+ * Normalize APPLY_INBOUND_DOMAIN / from-domain env values into a bare hostname.
+ * Fixes common misconfigs: URL, leading @, full email, trailing slash.
+ */
+export function normalizeInboundDomain(
+  raw: string | null | undefined,
+): string | null {
+  if (!raw) return null;
+  let d = scrubEmailText(raw);
+  d = d.replace(/^https?:\/\//, "");
+  d = d.split("/")[0] || "";
+  d = d.replace(/^@+/, "");
+  if (d.includes("@")) {
+    d = d.split("@").pop() || "";
+  }
+  d = d.replace(/\.+$/, "");
+
+  // Project brand typo: allincenter.co → allincenter.co.il
+  if (d === "allincenter.co") {
+    d = "allincenter.co.il";
+  }
+
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(d)) {
+    return null;
+  }
+  // Reject empty labels / leading-dot domains (.co.il)
+  if (d.startsWith(".") || d.includes("..")) return null;
+  return d;
+}
+
+/**
  * Resend accepts `email@example.com` or `Name <email@example.com>`.
  * We always send the bare address to avoid name/encoding edge cases.
  */
@@ -32,27 +69,22 @@ export function isValidResendTo(email: string | null | undefined): boolean {
   if (!clean || /[\s,<]/.test(clean) || clean.startsWith("mailto:")) {
     return false;
   }
-  // Must be exactly one extracted address (no surrounding junk).
-  return extractEmails(clean)[0] === clean;
+  if (!STRICT_EMAIL_RE.test(clean)) return false;
+  const domain = clean.split("@")[1] || "";
+  if (BLOCKED_DOMAINS.has(domain)) return false;
+  if (domain.startsWith(".") || domain.endsWith(".") || domain.includes("..")) {
+    return false;
+  }
+  return true;
 }
 
 export function extractEmails(text: string | null | undefined): string[] {
   if (!text) return [];
   const scrubbed = scrubEmailText(text);
-  // Reset lastIndex — EMAIL_RE is global
-  EMAIL_RE.lastIndex = 0;
-  const found = scrubbed.match(EMAIL_RE) ?? [];
-  const unique = [...new Set(found)];
-  return unique.filter((email) => {
-    const domain = email.split("@")[1] || "";
-    if (BLOCKED_DOMAINS.has(domain)) return false;
-    if (email.endsWith(".png") || email.endsWith(".jpg") || email.endsWith(".svg")) {
-      return false;
-    }
-    // Reject trailing-dot / double-dot noise that sometimes slips past match boundaries
-    if (email.includes("..") || email.startsWith(".") || email.endsWith(".")) return false;
-    return true;
-  });
+  EMAIL_FIND_RE.lastIndex = 0;
+  const found = scrubbed.match(EMAIL_FIND_RE) ?? [];
+  const unique = [...new Set(found.map((e) => e.toLowerCase()))];
+  return unique.filter((email) => isValidResendTo(email));
 }
 
 /** First clean address from free text, or null. */
@@ -61,7 +93,35 @@ export function normalizeApplyEmail(
 ): string | null {
   const emails = extractEmails(text);
   const first = emails[0] || null;
-  return first && isValidResendTo(first) ? first : null;
+  if (!first) return null;
+  // Repair known truncated brand domain left in older DB rows
+  if (first.endsWith("@allincenter.co")) {
+    return first.replace(/@allincenter\.co$/, "@allincenter.co.il");
+  }
+  return first;
+}
+
+/** Normalize Resend `from` — supports `email` or `Name <email>`. */
+export function normalizeFromAddress(
+  raw: string | null | undefined,
+): string | null {
+  const fallback = "onboarding@resend.dev";
+  const text = (raw || fallback).trim();
+  if (!text) return fallback;
+
+  const angle = text.match(/^(.+?)\s*<([^>]+)>$/);
+  if (angle) {
+    const name = angle[1].trim().replace(/[\r\n]/g, " ");
+    const email = normalizeApplyEmail(angle[2]);
+    if (!email) return null;
+    // Keep ASCII-ish names only to avoid Resend format rejects
+    if (/^[\w\s.\-'"+]+$/u.test(name) && name.length <= 70) {
+      return `${name} <${email}>`;
+    }
+    return email;
+  }
+
+  return normalizeApplyEmail(text);
 }
 
 export function resolveApplyEmail(job: {
@@ -109,13 +169,18 @@ export function explainResendFailure(error: string | null | undefined): string {
   if (/RESEND_API_KEY/i.test(e)) {
     return "לא נשלח — חסר RESEND_API_KEY ב-Vercel";
   }
-  if (/Invalid 'to' field|validation_error.*to|invalid.*to.*field/i.test(e)) {
-    return "לא נשלח — כתובת המייל של המעסיק לא תקינה (פורמט Resend)";
+  if (/Invalid [`'"]to[`'"] field|validation_error[\s\S]*?\bto\b|invalid[\s\S]*?\bto\b[\s\S]*?field/i.test(e)) {
+    const toMatch = e.match(/\bto=([^\s|"']+)/i);
+    const hint = toMatch?.[1] ? ` (${toMatch[1]})` : "";
+    return `לא נשלח — כתובת המייל של המעסיק לא תקינה${hint}`;
+  }
+  if (/Invalid [`'"]from[`'"] field/i.test(e)) {
+    return "לא נשלח — כתובת השולח (APPLICATION_FROM_EMAIL) לא תקינה ב-Resend";
   }
   if (/only send|testing emails|own email|verify a domain|domain is not verified/i.test(e)) {
-    return "לא נשלח — Resend במצב בדיקה. אמת דומיין (למשל allincenter.co.il) ב-Resend כדי לשלוח למיילים של מעסיקים";
+    return "לא נשלח — Resend במצב בדיקה. אמת דומיין (למשל allincenter.co.il) ב-Resend ושם APPLICATION_FROM_EMAIL לכתובת מהדומיין";
   }
-  if (e) return `לא נשלח — שגיאת Resend: ${e.slice(0, 180)}`;
+  if (e) return `לא נשלח — שגיאת Resend: ${e.slice(0, 120)}`;
   return "לא נשלח — שגיאה בשליחת המייל למעסיק";
 }
 

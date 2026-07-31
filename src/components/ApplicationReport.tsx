@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { AutofillKit } from "@/components/AutofillKit";
 import {
   wasLinkOpened,
@@ -106,7 +105,16 @@ function ApplicationCard({
       {app.skip_reason && (
         <p className="text-sm text-[var(--muted)]">{app.skip_reason}</p>
       )}
-      {app.error && <p className="text-sm text-red-700">{app.error}</p>}
+      {app.error && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-[var(--danger)] text-red-700">
+            פרטי שגיאה טכניים
+          </summary>
+          <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all text-xs text-red-700/90">
+            {app.error}
+          </pre>
+        </details>
+      )}
 
       {resume && (
         <details className="text-sm">

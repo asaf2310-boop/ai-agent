@@ -231,7 +231,18 @@ def catalog_board_job_dicts() -> list[dict[str, Any]]:
     import re
 
     now = datetime.now(timezone.utc)
-    inbound = (os.getenv("APPLY_INBOUND_DOMAIN") or "").strip()
+    inbound_raw = (os.getenv("APPLY_INBOUND_DOMAIN") or "").strip().lower()
+    inbound_raw = re.sub(r"^https?://", "", inbound_raw)
+    inbound_raw = inbound_raw.split("/")[0]
+    inbound_raw = inbound_raw.lstrip("@")
+    if "@" in inbound_raw:
+        inbound_raw = inbound_raw.split("@")[-1]
+    if inbound_raw == "allincenter.co":
+        inbound_raw = "allincenter.co.il"
+    inbound = inbound_raw if re.match(
+        r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+        inbound_raw or "",
+    ) else ""
     rows: list[dict[str, Any]] = []
     for i, (job_id, title, company, location, description, _domain) in enumerate(JOB_SPECS):
         source = BOARDS[i % len(BOARDS)]

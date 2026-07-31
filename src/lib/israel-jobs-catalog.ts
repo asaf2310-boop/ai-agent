@@ -3,6 +3,8 @@
  * Sources labeled like IL boards / LinkedIn until live scrapers or partner APIs exist.
  */
 
+import { normalizeInboundDomain } from "@/lib/apply-email";
+
 export type CatalogJob = {
   source: string;
   external_id: string;
@@ -30,9 +32,9 @@ function boardFor(i: number): string {
 
 /** Careers inbox so auto-apply can attempt a real email send (needs Resend + verified domain). */
 function careersEmail(company: string, id: string): string {
-  const domain =
-    (typeof process !== "undefined" && process.env.APPLY_INBOUND_DOMAIN?.trim()) ||
-    null;
+  const domain = normalizeInboundDomain(
+    typeof process !== "undefined" ? process.env.APPLY_INBOUND_DOMAIN : null,
+  );
   if (domain) {
     const safeId = id.replace(/[^a-zA-Z0-9-]/g, "").toLowerCase() || "role";
     return `job-${safeId}@${domain}`;
