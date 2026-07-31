@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { wasSentToEmployer, isClearedFromPool } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import { sortMatchesByNewest } from "@/lib/match-pool";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
@@ -100,7 +101,9 @@ export async function POST(request: Request) {
       if (isClearedFromPool(a)) clearedJobIds.add(a.job_id);
     }
 
-    const poolMatches = matches.filter((m) => !clearedJobIds.has(m.job_id));
+    const poolMatches = sortMatchesByNewest(
+      matches.filter((m) => !clearedJobIds.has(m.job_id)),
+    );
 
     return NextResponse.json({
       resume,
