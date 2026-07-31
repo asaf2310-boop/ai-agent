@@ -101,6 +101,35 @@ export function normalizeApplyEmail(
   return first;
 }
 
+/**
+ * Synthetic catalog inboxes (job-*@inbound / careers@slug.co.il) are NOT real
+ * employer addresses — never auto-send to them.
+ */
+export function isSyntheticApplyEmail(email: string | null | undefined): boolean {
+  const e = normalizeApplyEmail(email);
+  if (!e) return false;
+  if (/^job-[a-z0-9-]+@allincenter\.co\.il$/i.test(e)) return true;
+  const inbound = normalizeInboundDomain(process.env.APPLY_INBOUND_DOMAIN);
+  if (inbound && new RegExp(`^job-[a-z0-9-]+@${inbound.replace(/\./g, "\\.")}$`, "i").test(e)) {
+    return true;
+  }
+  // Catalog fallback pattern careers@{companyslug}.co.il (no real MX intended)
+  if (/^careers@[a-z0-9]{1,24}\.co\.il$/i.test(e)) return true;
+  return false;
+}
+
+/** Real recruiter inbox we may auto-email (excludes synthetic catalog addresses). */
+export function resolveEmployerEmail(job: {
+  apply_email?: string | null;
+  description?: string | null;
+  company?: string | null;
+  url?: string | null;
+}): string | null {
+  const email = resolveApplyEmail(job);
+  if (!email || isSyntheticApplyEmail(email)) return null;
+  return email;
+}
+
 /** Normalize Resend `from` — supports `email` or `Name <email>`. */
 export function normalizeFromAddress(
   raw: string | null | undefined,

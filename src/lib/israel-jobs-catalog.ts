@@ -3,8 +3,6 @@
  * Sources labeled like IL boards / LinkedIn until live scrapers or partner APIs exist.
  */
 
-import { normalizeInboundDomain } from "@/lib/apply-email";
-
 export type CatalogJob = {
   source: string;
   external_id: string;
@@ -31,20 +29,11 @@ function boardFor(i: number): string {
 }
 
 /** Careers inbox so auto-apply can attempt a real email send (needs Resend + verified domain). */
-function careersEmail(company: string, id: string): string {
-  const domain = normalizeInboundDomain(
-    typeof process !== "undefined" ? process.env.APPLY_INBOUND_DOMAIN : null,
-  );
-  if (domain) {
-    const safeId = id.replace(/[^a-zA-Z0-9-]/g, "").toLowerCase() || "role";
-    return `job-${safeId}@${domain}`;
-  }
-  const slug =
-    company
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "")
-      .slice(0, 24) || id.replace(/[^a-z0-9]/gi, "").toLowerCase() || "careers";
-  return `careers@${slug}.co.il`;
+function careersEmail(company: string, id: string): string | null {
+  // Do not invent fake employer inboxes — only real scraped/mailto emails are used for send.
+  void company;
+  void id;
+  return null;
 }
 
 const base = (

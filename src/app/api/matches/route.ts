@@ -42,14 +42,6 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const resumeId = searchParams.get("resumeId");
     const filters = parseFilters(searchParams);
-    const applyServerFilters =
-      searchParams.has("kind") ||
-      searchParams.has("location") ||
-      searchParams.has("q") ||
-      searchParams.has("query") ||
-      searchParams.has("postedWithin") ||
-      searchParams.has("postedFrom") ||
-      searchParams.has("postedTo");
     const minScore = Number(
       searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.2",
     );
@@ -126,15 +118,15 @@ export async function GET(request: Request) {
       matches.filter((m) => !clearedJobIds.has(m.job_id)),
     );
 
-    const pool = applyServerFilters
-      ? buildPoolMatches(available, filters)
-      : available;
+    // Always return at most POOL_LIMIT (50), newest first (+ optional filters)
+    const pool = buildPoolMatches(available, filters);
 
     return NextResponse.json({
       matches: pool,
       locations: uniqueLocations(available),
       poolCount: available.length,
-      shown: applyServerFilters ? pool.length : Math.min(pool.length, 50),
+      shown: pool.length,
+      poolLimit: 50,
       hiddenClearedCount: matches.length - available.length,
     });
   } catch (err) {

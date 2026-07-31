@@ -26,6 +26,7 @@ type Props = {
 function statusLabel(app: Application): string {
   if (wasSentToEmployer(app)) return "נשלח";
   if (wasLinkOpened(app)) return "נפתח";
+  if (app.status === "failed") return "שגיאה";
   return "לא נשלח";
 }
 
@@ -41,6 +42,7 @@ function ApplicationCard({
   const job = app.jobs;
   const sent = wasSentToEmployer(app);
   const opened = wasLinkOpened(app);
+  const employerEmail = job?.apply_email;
 
   return (
     <li className="space-y-2 py-4">
@@ -74,11 +76,13 @@ function ApplicationCard({
           {statusLabel(app)}
         </span>
       </div>
-      {job?.location && (
-        <p className="text-xs text-[var(--muted)]">
-          {[job.location, job.channel || job.source, job.apply_email]
-            .filter(Boolean)
-            .join(" · ")}
+      <p className="text-xs text-[var(--muted)]">
+        {[job?.location, job?.channel || job?.source].filter(Boolean).join(" · ")}
+      </p>
+      {sent && employerEmail && (
+        <p className="text-sm text-[var(--foreground)]/85">
+          <span className="font-medium">נשלח אל המעסיק: </span>
+          {employerEmail}
         </p>
       )}
       {app.recruiter_insights && (
@@ -107,7 +111,7 @@ function ApplicationCard({
       )}
       {app.error && (
         <details className="text-sm">
-          <summary className="cursor-pointer text-[var(--danger)] text-red-700">
+          <summary className="cursor-pointer text-red-700">
             פרטי שגיאה טכניים
           </summary>
           <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all text-xs text-red-700/90">
@@ -173,6 +177,14 @@ function AppList({
   );
 }
 
+function isHistoryWorthy(app: Application): boolean {
+  return (
+    wasSentToEmployer(app) ||
+    wasLinkOpened(app) ||
+    app.status === "failed"
+  );
+}
+
 export function ApplicationReport({
   applications,
   loading,
@@ -184,12 +196,14 @@ export function ApplicationReport({
     return <p className="text-sm text-[var(--muted)]">טוען דוח…</p>;
   }
 
-  const sentApps = applications.filter((a) => wasSentToEmployer(a));
-  const openedApps = applications.filter(
+  const history = applications.filter(isHistoryWorthy);
+  const sentApps = history.filter((a) => wasSentToEmployer(a));
+  const openedApps = history.filter(
     (a) => wasLinkOpened(a) && !wasSentToEmployer(a),
   );
-  const pendingApps = applications.filter(
-    (a) => !wasSentToEmployer(a) && !wasLinkOpened(a),
+  const failedApps = history.filter(
+    (a) =>
+      a.status === "failed" && !wasSentToEmployer(a) && !wasLinkOpened(a),
   );
   const sentCount = summary?.sent ?? sentApps.length;
   const openedCount = summary?.opened ?? openedApps.length;
@@ -197,26 +211,29 @@ export function ApplicationReport({
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap gap-3 text-sm text-[var(--muted)]">
-        <span>סה״כ: {summary?.total ?? applications.length}</span>
+        <span>בהיסטוריה: {history.length}</span>
         <span className="font-medium text-[var(--accent)]">
           נשלח: {sentCount}
         </span>
         <span className="font-medium text-[var(--accent)]">
           נפתח: {openedCount}
         </span>
-        <span className="font-medium">ממתין: {pendingApps.length}</span>
+        {failedApps.length > 0 && (
+          <span className="font-medium text-red-700">
+            שגיאות: {failedApps.length}
+          </span>
+        )}
       </div>
 
-      {applications.length === 0 ? (
+      {history.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין רשומות. אחרי סריקה — לכל משרה יהיה מילוי פרטים מהקו״ח והורדת
-          קובץ לצירוף בטופס באתר.
+          עדיין אין היסטוריה. אחרי שליחה למעסיק או פתיחת קישור — המשרה תופיע כאן.
         </p>
       ) : (
         <>
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              היסטוריה — נשלח למעסיק ({sentApps.length})
+              נשלח למעסיק ({sentApps.length})
             </h3>
             {sentApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">עדיין אין שליחות מייל.</p>
@@ -231,7 +248,7 @@ export function ApplicationReport({
 
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              היסטוריה — נפתח קישור ({openedApps.length})
+              נפתח קישור ({openedApps.length})
             </h3>
             {openedApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
@@ -246,20 +263,18 @@ export function ApplicationReport({
             )}
           </section>
 
-          <section className="space-y-2">
-            <h3 className="text-lg font-semibold">
-              ממתינות ({pendingApps.length})
-            </h3>
-            {pendingApps.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">אין ממתינות.</p>
-            ) : (
+          {failedApps.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-lg font-semibold text-red-700">
+                שגיאות שליחה ({failedApps.length})
+              </h3>
               <AppList
-                apps={pendingApps}
+                apps={failedApps}
                 resume={resume}
                 onOpenJobLink={onOpenJobLink}
               />
-            )}
-          </section>
+            </section>
+          )}
         </>
       )}
     </div>

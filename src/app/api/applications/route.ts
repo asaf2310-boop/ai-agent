@@ -43,7 +43,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const applications = data ?? [];
+    const applications = (data ?? []).filter(
+      (a) =>
+        wasSentToEmployer(a) ||
+        wasLinkOpened(a) ||
+        a.status === "failed",
+    );
     const sent = applications.filter((a) => wasSentToEmployer(a)).length;
     const opened = applications.filter(
       (a) => wasLinkOpened(a) && !wasSentToEmployer(a),
@@ -52,9 +57,9 @@ export async function GET(request: Request) {
       total: applications.length,
       sent,
       opened,
-      notSent: applications.length - sent,
-      prepared: applications.filter((a) => a.status === "prepared").length,
-      skipped: applications.filter((a) => a.status === "skipped").length,
+      notSent: 0,
+      prepared: 0,
+      skipped: 0,
       failed: applications.filter((a) => a.status === "failed").length,
     };
 
