@@ -127,31 +127,16 @@ export function HomeClient({ email }: { email?: string | null }) {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "סימון נכשל");
 
-        const job = json.application?.jobs;
-        const fromMatch = matches.find(
-          (m) => m.job_id === jobId || m.jobs?.id === jobId,
-        );
-        setAutofillJob({
-          jobId,
-          title: job?.title || fromMatch?.jobs?.title,
-          company: job?.company || fromMatch?.jobs?.company,
-          url: job?.url || fromMatch?.jobs?.url,
-          tailoredCvText:
-            json.application?.tailored_cv_text ||
-            applications.find((a) => a.job_id === jobId)?.tailored_cv_text,
-        });
-
         await Promise.all([
           loadMatches(resume?.id),
           loadApplications(resume?.id),
         ]);
-        setTab("cv");
-        setMessage("המשרה ירדה להיסטוריה — מלא פרטים להגשה באתר");
+        setMessage("המשרה הוסרה מהפול ועברה להיסטוריה");
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : "סימון קישור נכשל");
+        setMessage(err instanceof Error ? err.message : "הסרה מהפול נכשלה");
       }
     },
-    [resume, matches, applications, loadMatches, loadApplications],
+    [resume, loadMatches, loadApplications],
   );
 
   function prepareApplyFromMatch(match: JobMatch) {
@@ -159,18 +144,22 @@ export function HomeClient({ email }: { email?: string | null }) {
     const app = applications.find(
       (a) => a.job_id === match.job_id || a.job_id === job?.id,
     );
+    const openUrl = safeJobOpenUrl({
+      url: job?.url,
+      title: job?.title,
+      source: job?.source,
+      channel: job?.channel,
+      external_id: job?.external_id,
+    });
     setAutofillJob({
       jobId: job?.id || match.job_id,
       title: job?.title,
       company: job?.company,
-      url: job?.url,
+      url: openUrl || job?.url,
       tailoredCvText: app?.tailored_cv_text,
     });
-    if (job?.id) {
-      void markJobOpened(job.id, match.id);
-    } else {
-      setTab("cv");
-    }
+    setTab("cv");
+    setMessage("המשרה נשארת בפול — מלא פרטים והגש באתר, או לחץ ״הסר מהפול״ כשסיימת");
   }
 
   const autoApplyFromMatch = useCallback(
@@ -375,7 +364,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  עד 50 · הגשה אוטומטית בטופס/מייל · או מילוי מהקו״ח
+                  עד 50 · פתיחת קישור לא מסירה מהפול · ״הסר מהפול״ להעברה להיסטוריה
                 </p>
               </div>
               <div className="flex gap-2">
@@ -402,7 +391,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             <MatchList
               matches={matches}
               loading={loadingMatches}
-              onOpenJobLink={(jobId, matchId) => {
+              onDismissFromPool={(jobId, matchId) => {
                 void markJobOpened(jobId, matchId);
               }}
               onPrepareApply={prepareApplyFromMatch}
@@ -425,17 +414,6 @@ export function HomeClient({ email }: { email?: string | null }) {
               loading={loadingApps}
               resume={resume}
               summary={summary}
-              onOpenJobLink={(jobId) => {
-                const app = applications.find((a) => a.job_id === jobId);
-                setAutofillJob({
-                  jobId,
-                  title: app?.jobs?.title,
-                  company: app?.jobs?.company,
-                  url: app?.jobs?.url,
-                  tailoredCvText: app?.tailored_cv_text,
-                });
-                void markJobOpened(jobId, app?.match_id || undefined);
-              }}
             />
           </section>
         )}

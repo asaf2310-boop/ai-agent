@@ -216,7 +216,7 @@ export function ApplicationReport({
       {history.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
           עדיין אין היסטוריה. כאן יופיעו משרות שנשלחו למייל מעסיק, שהוגשו
-          אוטומטית בטופס באתר, או שנפתח הקישור שלהן מהפול.
+          אוטומטית בטופס באתר, או שהוסרו מהפול ידנית.
         </p>
       ) : (
         <>
@@ -240,11 +240,11 @@ export function ApplicationReport({
 
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              נפתח קישור ({openedApps.length})
+              הוסר מהפול ({openedApps.length})
             </h3>
             {openedApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                עדיין לא נפתח אף קישור מהפול.
+                משרות שהוסרו מהפול ידנית (״הסר מהפול״).
               </p>
             ) : (
               <AppList

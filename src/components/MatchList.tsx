@@ -17,7 +17,8 @@ import {
 type Props = {
   matches: JobMatch[];
   loading: boolean;
-  onOpenJobLink?: (jobId: string, matchId: string) => void;
+  /** Explicitly remove from pool (not on mere link open). */
+  onDismissFromPool?: (jobId: string, matchId: string) => void;
   onPrepareApply?: (match: JobMatch) => void;
   onAutoApply?: (match: JobMatch) => void;
   autoApplyBusyId?: string | null;
@@ -69,7 +70,7 @@ const selectClass =
 export function MatchList({
   matches,
   loading,
-  onOpenJobLink,
+  onDismissFromPool,
   onPrepareApply,
   onAutoApply,
   autoApplyBusyId = null,
@@ -251,7 +252,7 @@ export function MatchList({
       {matches.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
           עדיין אין משרות בפול. לחץ ״הפעל סריקה + הגשה אוטומטית״. משרות שהוגשו
-          או שנפתח הקישור שלהן יורדות להיסטוריה.
+          או שהוסרו מהפול יורדות להיסטוריה. פתיחת קישור לבד לא מסירה מהפול.
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
@@ -269,9 +270,6 @@ export function MatchList({
               channel: job?.channel,
               external_id: job?.external_id,
             });
-            const markOpened = () => {
-              if (job?.id) onOpenJobLink?.(job.id, match.id);
-            };
             return (
               <li key={match.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -282,7 +280,6 @@ export function MatchList({
                         target="_blank"
                         rel="noreferrer"
                         className="hover:text-[var(--accent)]"
-                        onClick={markOpened}
                       >
                         {job?.title ?? "משרה"}
                       </a>
@@ -334,10 +331,18 @@ export function MatchList({
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
-                      onClick={markOpened}
                     >
                       פתח באתר ↗
                     </a>
+                  )}
+                  {job?.id && (
+                    <button
+                      type="button"
+                      onClick={() => onDismissFromPool?.(job.id, match.id)}
+                      className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)] underline-offset-2 hover:underline"
+                    >
+                      הסר מהפול
+                    </button>
                   )}
                 </div>
               </li>
