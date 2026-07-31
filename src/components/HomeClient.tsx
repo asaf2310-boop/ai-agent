@@ -222,29 +222,11 @@ export function HomeClient({ email }: { email?: string | null }) {
           return;
         }
 
-        // Fallback: open assisted fill flow
-        setAutofillJob({
-          jobId,
-          title: json.job?.title || job?.title,
-          company: json.job?.company || job?.company,
-          url: json.job?.url || job?.url,
-          tailoredCvText: json.tailoredCvText,
-        });
+        // Do not open LinkedIn search / fake links — that looked like a fake apply
         setMessage(
           json.error ||
-            "לא ניתן להגיש מהשרת — נפתח מילוי מהקו״ח. פתח את האתר והשתמש בבוקמרקלט.",
+            "אין אפשרות להגשה אוטומטית למשרה הזו (חסר מייל מעסיק או טופס ATS).",
         );
-        if (job?.url || json.job?.url) {
-          const open = safeJobOpenUrl({
-            url: json.job?.url || job?.url,
-            title: json.job?.title || job?.title,
-            source: job?.source,
-            channel: job?.channel,
-            external_id: job?.external_id,
-          });
-          if (open) window.open(open, "_blank", "noopener,noreferrer");
-        }
-        setTab("cv");
         await loadMatches(resume?.id);
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");
@@ -396,7 +378,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  עד 50 · פתיחת קישור לא מסירה מהפול · ״הסר מהפול״ להעברה להיסטוריה
+                  עד 50 · שליחת מייל/ATS רצה בסריקה · כפתור הגשה רק כשיש טופס אמיתי
                 </p>
               </div>
               <div className="flex gap-2">

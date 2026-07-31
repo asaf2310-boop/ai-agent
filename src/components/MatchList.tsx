@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
 import { safeJobOpenUrl } from "@/lib/linkedin-url";
+import { canAutoApplyJob } from "@/lib/web-apply";
 import {
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
@@ -270,6 +271,7 @@ export function MatchList({
               channel: job?.channel,
               external_id: job?.external_id,
             });
+            const showAutoApply = Boolean(job && canAutoApplyJob(job));
             return (
               <li key={match.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -308,20 +310,26 @@ export function MatchList({
                   </p>
                 )}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onAutoApply?.(match)}
-                    disabled={autoApplyBusyId === (job?.id || match.job_id)}
-                    className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-                  >
-                    {autoApplyBusyId === (job?.id || match.job_id)
-                      ? "מגיש…"
-                      : "הגש אוטומטית"}
-                  </button>
+                  {showAutoApply && (
+                    <button
+                      type="button"
+                      onClick={() => onAutoApply?.(match)}
+                      disabled={autoApplyBusyId === (job?.id || match.job_id)}
+                      className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                    >
+                      {autoApplyBusyId === (job?.id || match.job_id)
+                        ? "מגיש…"
+                        : "הגש אוטומטית"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onPrepareApply?.(match)}
-                    className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
+                    className={
+                      showAutoApply
+                        ? "rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
+                        : "rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+                    }
                   >
                     מלא טופס מהקו״ח
                   </button>

@@ -6,11 +6,11 @@ import {
 import { requireUser } from "@/lib/auth";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { tryAutoWebApply } from "@/lib/web-apply";
+import { tryAutoWebApply, canAutoApplyJob } from "@/lib/web-apply";
 
 /**
- * Auto-apply to one job: fill ATS/careers form from CV and submit when possible.
- * Falls back with an error detail when LinkedIn Easy Apply / login walls block server submit.
+ * Auto-apply to one job via ATS form when a real Greenhouse/Lever/etc. URL exists.
+ * Not for LinkedIn Easy Apply or search fallbacks.
  */
 export async function POST(request: Request) {
   try {
@@ -75,6 +75,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
+    if (!canAutoApplyJob(job)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "אין הגשה אוטומטית למשרה הזו — חסר טופס ATS (Greenhouse/Lever וכו׳). השתמש במילוי ידני או המתן לשליחת מייל בסריקה.",
+        },
+        { status: 422 },
+      );
+    }
+
     const { data: existing } = await supabase
       .from("applications")
       .select("*")
@@ -116,15 +127,6 @@ export async function POST(request: Request) {
           ok: false,
           error: web?.detail || "הגשה אוטומטית נכשלה",
           ats: web?.ats,
-          assist: true,
-          job: {
-            id: job.id,
-            title: job.title,
-            company: job.company,
-            url: job.url,
-          },
-          tailoredCvText: tailoredCv,
-          insights,
         },
         { status: 422 },
       );
