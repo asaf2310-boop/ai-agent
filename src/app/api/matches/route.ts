@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
 import {
   buildPoolMatches,
+  DEFAULT_POOL_FILTERS,
+  POOL_LIMIT,
   sortMatchesByNewest,
   uniqueLocations,
   type MatchPoolFilters,
@@ -121,15 +123,26 @@ export async function GET(request: Request) {
       ),
     );
 
-    // Always return at most POOL_LIMIT (50), newest first (+ optional filters)
-    const pool = buildPoolMatches(available, filters);
+    const hasServerFilters =
+      filters.kind !== DEFAULT_POOL_FILTERS.kind ||
+      Boolean(filters.location.trim()) ||
+      Boolean(filters.query.trim()) ||
+      filters.postedWithin !== DEFAULT_POOL_FILTERS.postedWithin ||
+      Boolean(filters.postedFrom) ||
+      Boolean(filters.postedTo);
+
+    // Without query-param filters: return a wide active set so the client can
+    // filter (kind/date/location) before capping at POOL_LIMIT (50).
+    const pool = hasServerFilters
+      ? buildPoolMatches(available, filters, POOL_LIMIT)
+      : available.slice(0, 200);
 
     return NextResponse.json({
       matches: pool,
       locations: uniqueLocations(available),
       poolCount: available.length,
-      shown: pool.length,
-      poolLimit: 50,
+      shown: Math.min(pool.length, POOL_LIMIT),
+      poolLimit: POOL_LIMIT,
       hiddenClearedCount: matches.length - available.length,
     });
   } catch (err) {

@@ -31,13 +31,24 @@ function scoreLabel(score: number) {
 
 function kindLabel(job: JobMatch["jobs"]) {
   if (!job) return null;
-  if (job.source === "linkedin") return "LinkedIn";
+  const source = (job.source || "").toLowerCase();
+  if (source === "linkedin") return "LinkedIn";
+  if (source === "drushim") return "דרושים";
+  if (source === "remoteok") return "RemoteOK";
+  if (source === "remotive") return "Remotive";
+  if (source === "arbeitnow") return "Arbeitnow";
+  if (source.startsWith("rss-")) return "RSS";
   if (job.post_kind === "freelance") return "פרילנס";
-  if (job.is_social || job.post_kind === "social") return "סושיאל";
   if (
-    ["alljobs", "drushim", "jobmaster", "jobnet", "gotfriends"].includes(
-      job.source || "",
-    )
+    job.post_kind === "social" ||
+    source.startsWith("social-") ||
+    (job.is_social &&
+      !["remoteok", "remotive", "drushim", "arbeitnow"].includes(source))
+  ) {
+    return "סושיאל";
+  }
+  if (
+    ["alljobs", "jobmaster", "jobnet", "gotfriends"].includes(source)
   ) {
     return "לוח משרות";
   }
@@ -48,9 +59,9 @@ const KIND_OPTIONS: { value: MatchPoolFilters["kind"]; label: string }[] = [
   { value: "all", label: "כל הסוגים" },
   { value: "job", label: "משרה" },
   { value: "freelance", label: "פרילנס" },
-  { value: "social", label: "פוסט סושיאל" },
   { value: "linkedin", label: "LinkedIn" },
-  { value: "board", label: "לוח משרות" },
+  { value: "board", label: "לוחות (דרושים / Remote)" },
+  { value: "social", label: "פוסט סושיאל" },
 ];
 
 const DATE_OPTIONS: {
@@ -246,19 +257,19 @@ export function MatchList({
       <p className="text-sm text-[var(--muted)]">
         עד {POOL_LIMIT} משרות · החדשה ביותר קודם
         {matches.length > 0
-          ? ` · ${Math.min(filtered.length, POOL_LIMIT)} מתוך ${filteredCount} אחרי סינון (${matches.length} בפול)`
+          ? ` · מוצגות ${filtered.length} מתוך ${filteredCount} אחרי סינון (${matches.length} זמינות)`
           : ""}
       </p>
 
       {matches.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין משרות בפול עם קישור פעיל. לחץ ״הפעל סריקה + הגשה אוטומטית״.
-          משרות בלי קישור / דמו לא מוצגות. שליחה אוטומטית רצה כשיש מייל מעסיק או
-          טופס הגשה באתר.
+          עדיין אין משרות בפול עם קישור פעיל. לחץ ״הפעל סריקה + הגשה אוטומטית״ —
+          נטען דרושים, LinkedIn, Remotive ו-RemoteOK עם קישורים אמיתיים.
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          אין משרות שמתאימות לסינון. נסו לשנות סוג, תאריך, מיקום או חיפוש.
+          אין משרות שמתאימות לסינון. נסו ״כל הסוגים״, נקו תאריך/מיקום, או חפשו
+          מילה אחרת.
         </p>
       ) : (
         <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">

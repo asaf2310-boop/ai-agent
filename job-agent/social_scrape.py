@@ -134,7 +134,7 @@ def fetch_remoteok(limit: int = 25) -> list[ScrapedJob]:
                 apply_email=None,
                 post_kind=kind,
                 channel="remoteok",
-                is_social=True,
+                is_social=False,
             )
         )
         if len(jobs) >= limit:
@@ -144,48 +144,157 @@ def fetch_remoteok(limit: int = 25) -> list[ScrapedJob]:
 
 def fetch_remotive(limit: int = 25) -> list[ScrapedJob]:
     jobs: list[ScrapedJob] = []
+    queries: list[dict[str, str | int]] = [
+        {"search": "Israel", "limit": 100},
+        {"category": "software-dev", "limit": 50},
+        {"category": "product", "limit": 40},
+        {"category": "data", "limit": 40},
+    ]
+    seen: set[str] = set()
     try:
         with httpx.Client(timeout=20.0, headers={"User-Agent": USER_AGENT}) as client:
-            resp = client.get(
-                "https://remotive.com/api/remote-jobs",
-                params={"category": "software-dev", "limit": limit},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            for params in queries:
+                try:
+                    resp = client.get(
+                        "https://remotive.com/api/remote-jobs",
+                        params=params,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception:  # noqa: BLE001
+                    continue
+                for item in data.get("jobs") or []:
+                    title = item.get("title") or ""
+                    desc = item.get("description") or ""
+                    location = item.get("candidate_required_location") or ""
+                    company = item.get("company_name")
+                    if not is_israel_job(str(location), desc, str(company or "")):
+                        continue
+                    text = f"{title} {desc} {item.get('job_type') or ''}"
+                    kind = "freelance" if FREELANCE_HINTS.search(text) else "job"
+                    if kind == "job" and not JOB_HINTS.search(text):
+                        continue
+                    url = item.get("url")
+                    if not url:
+                        continue
+                    eid = str(item.get("id") or _id_from_url(url))
+                    if eid in seen:
+                        continue
+                    seen.add(eid)
+                    jobs.append(
+                        ScrapedJob(
+                            source="remotive",
+                            external_id=eid,
+                            title=title,
+                            company=company,
+                            location=str(location) or "Israel / Remote",
+                            url=url,
+                            description=re.sub("<[^>]+>", " ", desc)[:4000],
+                            posted_at=_parse_date(item.get("publication_date")),
+                            apply_email=None,
+                            post_kind=kind,
+                            channel="remotive",
+                            is_social=False,
+                        )
+                    )
+                    if len(jobs) >= limit:
+                        return jobs
     except Exception:  # noqa: BLE001
         return jobs
-
-    for item in data.get("jobs") or []:
-        title = item.get("title") or ""
-        desc = item.get("description") or ""
-        location = item.get("candidate_required_location") or ""
-        company = item.get("company_name")
-        if not is_israel_job(str(location), desc, str(company or "")):
-            continue
-        text = f"{title} {desc} {item.get('job_type') or ''}"
-        kind = "freelance" if FREELANCE_HINTS.search(text) else "job"
-        if kind == "job" and not JOB_HINTS.search(text):
-            continue
-        url = item.get("url")
-        if not url:
-            continue
-        jobs.append(
-            ScrapedJob(
-                source="remotive",
-                external_id=str(item.get("id") or _id_from_url(url)),
-                title=title,
-                company=company,
-                location=str(location) or "Israel",
-                url=url,
-                description=re.sub("<[^>]+>", " ", desc)[:4000],
-                posted_at=_parse_date(item.get("publication_date")),
-                apply_email=None,
-                post_kind=kind,
-                channel="remotive",
-                is_social=True,
-            )
-        )
     return jobs[:limit]
+
+
+def fetch_drushim(limit: int = 60) -> list[ScrapedJob]:
+    """Live Drushim search API — real /job/{code}/{hash}/ deep-links."""
+    jobs: list[ScrapedJob] = []
+    searches = [
+        "AI",
+        "product manager",
+        "מנהל מוצר",
+        "python",
+        "full stack",
+        "devops",
+        "data scientist",
+        "finance",
+        "project manager",
+        "machine learning",
+    ]
+    seen: set[str] = set()
+    try:
+        with httpx.Client(timeout=25.0, headers={"User-Agent": USER_AGENT}) as client:
+            for term in searches:
+                if len(jobs) >= limit:
+                    break
+                try:
+                    resp = client.get(
+                        "https://www.drushim.co.il/api/jobs/search",
+                        params={"searchTerm": term, "page": 1},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception:  # noqa: BLE001
+                    continue
+                for item in data.get("ResultList") or []:
+                    info = item.get("JobInfo") or {}
+                    content = item.get("JobContent") or {}
+                    company = item.get("Company") or {}
+                    code = str(info.get("JobCode") or content.get("JobCode") or item.get("Code") or "")
+                    hash_ = str(info.get("Hash") or "").lower()
+                    link = str(info.get("Link") or "")
+                    if not code or code in seen:
+                        continue
+                    if link.startswith("/job/"):
+                        url = f"https://www.drushim.co.il{link}"
+                    elif hash_:
+                        url = f"https://www.drushim.co.il/job/{code}/{hash_}/"
+                    else:
+                        continue
+                    if not re.search(r"/job/\d+/[a-z0-9]+/?", url, re.I):
+                        continue
+                    title = re.sub("<[^>]+>", " ", str(content.get("Name") or "משרה")).strip()
+                    desc = re.sub(
+                        "<[^>]+>",
+                        " ",
+                        f"{content.get('Description') or ''} {content.get('Requirements') or ''}",
+                    )[:4000]
+                    addresses = content.get("Addresses") or []
+                    cities = [a.get("City") for a in addresses if a.get("City")]
+                    regions = [
+                        r.get("NameInHebrew")
+                        for r in (content.get("Regions") or [])
+                        if r.get("NameInHebrew")
+                    ]
+                    location = " / ".join(cities[:3] or regions[:3] or ["ישראל"])
+                    company_name = str(
+                        company.get("CompanyDisplayName") or company.get("NameInHebrew") or ""
+                    )
+                    kind = "freelance" if FREELANCE_HINTS.search(f"{title} {desc}") else "job"
+                    posted = _parse_date(
+                        str(info.get("DisplayDate") or info.get("JumpDate") or info.get("Date") or "")
+                        or None
+                    )
+                    seen.add(code)
+                    jobs.append(
+                        ScrapedJob(
+                            source="drushim",
+                            external_id=code,
+                            title=title,
+                            company=company_name or None,
+                            location=location,
+                            url=url,
+                            description=desc or title,
+                            posted_at=posted,
+                            apply_email=None,
+                            post_kind=kind,
+                            channel="drushim",
+                            is_social=False,
+                        )
+                    )
+                    if len(jobs) >= limit:
+                        break
+    except Exception:  # noqa: BLE001
+        return jobs
+    return jobs
 
 
 def fetch_rss_feed(feed_url: str, limit: int = 20) -> list[ScrapedJob]:
@@ -244,7 +353,8 @@ def fetch_rss_feed(feed_url: str, limit: int = 20) -> list[ScrapedJob]:
 def discover_social_jobs() -> list[ScrapedJob]:
     discovered: list[ScrapedJob] = []
     discovered.extend(fetch_remoteok(limit=40))
-    discovered.extend(fetch_remotive(limit=40))
+    discovered.extend(fetch_remotive(limit=60))
+    discovered.extend(fetch_drushim(limit=70))
 
     try:
         from linkedin_jobs import fetch_linkedin_israel_jobs
@@ -261,17 +371,15 @@ def discover_social_jobs() -> list[ScrapedJob]:
     for url in rss_urls:
         discovered.extend(fetch_rss_feed(url))
 
-    discovered.extend(sample_social_posts())
+    # Skip null-URL catalog social demos — they cannot open in the pool.
 
     uniq: dict[tuple[str, str], ScrapedJob] = {}
     for job in discovered:
-        if job.source == "linkedin":
+        if job.source in ("linkedin", "drushim"):
             uniq[(job.source, job.external_id)] = job
             continue
         if not is_israel_job(job.location, job.description, job.company):
-            # keep explicit IL social samples
-            if not str(job.source).startswith("social"):
-                continue
+            continue
         uniq[(job.source, job.external_id)] = job
     return list(uniq.values())
 

@@ -14,6 +14,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncDrushimJobs,
   syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const supabase = createAdminClient();
     await ensureSampleJobs(supabase);
     await syncLiveSocialJobs(supabase);
+    await syncDrushimJobs(supabase);
     await syncLinkedInJobs(supabase);
 
     let resumeQuery = supabase
@@ -151,11 +153,12 @@ export async function POST(request: Request) {
       }
     }
 
+    // Wide active set for client-side filters; UI caps display at POOL_LIMIT.
     const poolMatches = sortMatchesByNewest(
       matches.filter(
         (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
       ),
-    ).slice(0, POOL_LIMIT);
+    ).slice(0, Math.max(POOL_LIMIT, 200));
 
     const historyApps = appRows.filter((a) => isHistoryEntry(a));
 
