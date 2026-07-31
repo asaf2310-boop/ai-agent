@@ -5,6 +5,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
 import { extractResumeText, extractSkills } from "@/lib/resume-extract";
@@ -143,6 +144,7 @@ export async function POST(request: Request) {
 
     await ensureSampleJobs(supabase);
     await syncLiveSocialJobs(supabase);
+    await syncLinkedInJobs(supabase);
     const matches = await matchResumeToJobs(supabase, resume, undefined, user.id);
     const applications = await processApplicationsForResume(
       supabase,

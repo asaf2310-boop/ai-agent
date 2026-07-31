@@ -6,6 +6,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
 import type { Application, Resume } from "@/lib/types";
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
     const supabase = createAdminClient();
     await ensureSampleJobs(supabase);
     await syncLiveSocialJobs(supabase);
+    await syncLinkedInJobs(supabase);
 
     let resumeQuery = supabase
       .from("resumes")

@@ -8,6 +8,10 @@ import {
 } from "@/lib/apply-email";
 import { isIsraelLocation } from "@/lib/israel";
 import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
+import {
+  fetchLinkedInIsraelJobs,
+  pruneOldLinkedInJobs,
+} from "@/lib/linkedin-jobs";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
@@ -190,6 +194,22 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
   }
 
   return rows.length;
+}
+
+/** LinkedIn active jobs in Israel from the past 7 days (+ prune older). */
+export async function syncLinkedInJobs(supabase: DbClient) {
+  const jobs = await fetchLinkedInIsraelJobs({
+    maxJobs: 80,
+    enrichDescriptions: 20,
+  });
+  if (jobs.length) {
+    await upsertJobBatch(
+      supabase,
+      jobs.map((j) => ({ ...j })),
+    );
+  }
+  await pruneOldLinkedInJobs(supabase, 7);
+  return jobs.length;
 }
 
 export async function matchResumeToJobs(

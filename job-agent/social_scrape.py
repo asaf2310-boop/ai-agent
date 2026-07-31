@@ -246,6 +246,13 @@ def discover_social_jobs() -> list[ScrapedJob]:
     discovered.extend(fetch_remoteok(limit=40))
     discovered.extend(fetch_remotive(limit=40))
 
+    try:
+        from linkedin_jobs import fetch_linkedin_israel_jobs
+
+        discovered.extend(fetch_linkedin_israel_jobs(max_jobs=80, enrich=20))
+    except Exception:  # noqa: BLE001
+        pass
+
     rss_urls = [
         u.strip()
         for u in (os.getenv("SOCIAL_RSS_URLS") or "").split(",")
@@ -258,6 +265,9 @@ def discover_social_jobs() -> list[ScrapedJob]:
 
     uniq: dict[tuple[str, str], ScrapedJob] = {}
     for job in discovered:
+        if job.source == "linkedin":
+            uniq[(job.source, job.external_id)] = job
+            continue
         if not is_israel_job(job.location, job.description, job.company):
             # keep explicit IL social samples
             if not str(job.source).startswith("social"):

@@ -447,19 +447,23 @@ def run() -> None:
     min_score = float(os.getenv("MIN_MATCH_SCORE", "0.2"))
     max_age_days = int(os.getenv("MAX_JOB_AGE_DAYS", "7"))
 
+    from linkedin_jobs import prune_old_linkedin_jobs
     from social_scrape import discover_social_jobs
 
     client = get_supabase(schema)
     jobs = sample_jobs() + discover_social_jobs()
     upserted = upsert_jobs(client, jobs)
     pruned = prune_old_jobs(client, max_age_days)
+    pruned_li = prune_old_linkedin_jobs(client, max_age_days)
     matches = refresh_matches(client, min_score, max_age_days)
     applied = process_applications(client, matches)
 
     social_count = sum(1 for j in jobs if j.is_social)
+    linkedin_count = sum(1 for j in jobs if j.source == "linkedin")
     print(
         "refresh ok: "
-        f"upserted={len(upserted)} social={social_count} pruned={pruned} "
+        f"upserted={len(upserted)} linkedin={linkedin_count} social={social_count} "
+        f"pruned={pruned} pruned_linkedin={pruned_li} "
         f"matches_written={len(matches)} applications={applied}"
     )
 
