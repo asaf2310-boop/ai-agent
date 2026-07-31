@@ -5,6 +5,12 @@
 
 import { isIsraelLocation } from "@/lib/israel";
 import { extractEmails } from "@/lib/apply-email";
+import { extractExternalApplyUrl } from "@/lib/web-apply";
+import {
+  isRealLinkedInJobId,
+  linkedInJobViewUrl,
+  normalizeLinkedInOpenUrl,
+} from "@/lib/linkedin-url";
 
 export type LinkedInJobRow = {
   source: string;
@@ -90,8 +96,11 @@ function parseListHtml(html: string): Array<{
     const href =
       card.match(
         /base-card__full-link[^>]*href="([^"]+)"/i,
-      )?.[1] || `https://www.linkedin.com/jobs/view/${id}`;
-    const url = decodeHtml(href).split("?")[0];
+      )?.[1] || "";
+    const url = normalizeLinkedInOpenUrl(
+      href ? decodeHtml(href).split("?")[0] : null,
+      { externalId: id, title },
+    );
     const postedAt =
       card.match(/<time[^>]*datetime="([^"]+)"/i)?.[1] || null;
 
@@ -218,6 +227,17 @@ export async function fetchLinkedInIsraelJobs(options?: {
     if (desc.length > 80) {
       job.description = desc;
       job.apply_email = extractEmails(desc)[0] || null;
+      const applyPage = extractExternalApplyUrl(desc);
+      // Keep a working LinkedIn view URL for "open job"; stash ATS link in description
+      // for web-apply (resolveApplyPageUrl reads description).
+      const view = linkedInJobViewUrl(job.external_id);
+      if (view) job.url = view;
+      if (applyPage) {
+        job.description = `Apply: ${applyPage}\n\n${desc}`;
+      }
+    } else if (isRealLinkedInJobId(job.external_id)) {
+      const view = linkedInJobViewUrl(job.external_id);
+      if (view) job.url = view;
     }
   }
 

@@ -173,24 +173,35 @@ export function resolveApplyEmail(job: {
   return normalizeApplyEmail(job.description);
 }
 
-/** Was this application actually emailed to an employer? */
+/** Email send or successful automatic web-form submit. */
 export function wasSentToEmployer(app: {
   status: string;
   method?: string | null;
 }): boolean {
-  return app.status === "sent" && app.method === "job-email";
+  return (
+    app.status === "sent" &&
+    (app.method === "job-email" || app.method === "web-form")
+  );
+}
+
+/** Auto-submitted on the employer's career / ATS page. */
+export function wasWebFormApplied(app: {
+  status: string;
+  method?: string | null;
+}): boolean {
+  return app.status === "sent" && app.method === "web-form";
 }
 
 /**
- * Sent via Resend to a *real* recruiter inbox (not catalog job-*@allincenter).
- * Requires jobs.apply_email when available on the row.
+ * Real application: email to a non-synthetic recruiter inbox, or web-form submit.
  */
 export function wasSentToRealEmployer(app: {
   status: string;
   method?: string | null;
   jobs?: { apply_email?: string | null } | null;
 }): boolean {
-  if (!wasSentToEmployer(app)) return false;
+  if (wasWebFormApplied(app)) return true;
+  if (!(app.status === "sent" && app.method === "job-email")) return false;
   // Without joined job we cannot verify — treat as not a confirmed real send in history UIs
   if (!app.jobs) return false;
   if (!app.jobs.apply_email) return false;

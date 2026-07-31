@@ -4,8 +4,9 @@ import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Mark a job as "link opened" — moves it to history and out of the active pool.
- * Does not downgrade an already-sent employer email application.
+ * Explicitly remove a job from the active pool (user tapped "הסר מהפול").
+ * Does not run when the user merely opens the job URL in a new tab.
+ * Does not downgrade an already-sent employer email / web-form application.
  */
 export async function POST(request: Request) {
   try {
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
       match_id: body.matchId || current?.match_id || null,
       status: "prepared" as const,
       method: "link-opened",
-      skip_reason: "נפתח קישור — הועבר להיסטוריה ולא יחזור לפול",
+      skip_reason: "הוסר מהפול ידנית — נשמר בהיסטוריה כפתיחת קישור",
       recruiter_insights: current?.recruiter_insights ?? null,
       tailored_cv_text: current?.tailored_cv_text ?? null,
       error: null,

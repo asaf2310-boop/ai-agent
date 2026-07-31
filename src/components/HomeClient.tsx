@@ -12,6 +12,7 @@ import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatchList } from "@/components/MatchList";
 import { ResumeUpload } from "@/components/ResumeUpload";
 import type { Application, JobMatch, Resume } from "@/lib/types";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
 
 type Summary = {
   total: number;
@@ -33,6 +34,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [loadingMatches, setLoadingMatches] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [autoApplyBusyId, setAutoApplyBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [autofillJob, setAutofillJob] = useState<{
     jobId?: string;
@@ -125,31 +127,16 @@ export function HomeClient({ email }: { email?: string | null }) {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "סימון נכשל");
 
-        const job = json.application?.jobs;
-        const fromMatch = matches.find(
-          (m) => m.job_id === jobId || m.jobs?.id === jobId,
-        );
-        setAutofillJob({
-          jobId,
-          title: job?.title || fromMatch?.jobs?.title,
-          company: job?.company || fromMatch?.jobs?.company,
-          url: job?.url || fromMatch?.jobs?.url,
-          tailoredCvText:
-            json.application?.tailored_cv_text ||
-            applications.find((a) => a.job_id === jobId)?.tailored_cv_text,
-        });
-
         await Promise.all([
           loadMatches(resume?.id),
           loadApplications(resume?.id),
         ]);
-        setTab("cv");
-        setMessage("המשרה ירדה להיסטוריה — מלא פרטים להגשה באתר");
+        setMessage("המשרה הוסרה מהפול ועברה להיסטוריה");
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : "סימון קישור נכשל");
+        setMessage(err instanceof Error ? err.message : "הסרה מהפול נכשלה");
       }
     },
-    [resume, matches, applications, loadMatches, loadApplications],
+    [resume, loadMatches, loadApplications],
   );
 
   function prepareApplyFromMatch(match: JobMatch) {
@@ -157,19 +144,84 @@ export function HomeClient({ email }: { email?: string | null }) {
     const app = applications.find(
       (a) => a.job_id === match.job_id || a.job_id === job?.id,
     );
+    const openUrl = safeJobOpenUrl({
+      url: job?.url,
+      title: job?.title,
+      source: job?.source,
+      channel: job?.channel,
+      external_id: job?.external_id,
+    });
     setAutofillJob({
       jobId: job?.id || match.job_id,
       title: job?.title,
       company: job?.company,
-      url: job?.url,
+      url: openUrl || job?.url,
       tailoredCvText: app?.tailored_cv_text,
     });
-    if (job?.id) {
-      void markJobOpened(job.id, match.id);
-    } else {
-      setTab("cv");
-    }
+    setTab("cv");
+    setMessage("המשרה נשארת בפול — מלא פרטים והגש באתר, או לחץ ״הסר מהפול״ כשסיימת");
   }
+
+  const autoApplyFromMatch = useCallback(
+    async (match: JobMatch) => {
+      const job = match.jobs;
+      const jobId = job?.id || match.job_id;
+      if (!jobId) return;
+      setAutoApplyBusyId(jobId);
+      setMessage(null);
+      try {
+        const res = await fetch("/api/applications/auto-apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId,
+            matchId: match.id,
+            resumeId: resume?.id,
+          }),
+        });
+        const json = await res.json();
+        if (res.ok && json.ok) {
+          setMessage(json.detail || "הוגש אוטומטית בטופס האתר ✓");
+          await Promise.all([
+            loadMatches(resume?.id),
+            loadApplications(resume?.id),
+          ]);
+          setTab("history");
+          return;
+        }
+
+        // Fallback: open assisted fill flow
+        setAutofillJob({
+          jobId,
+          title: json.job?.title || job?.title,
+          company: json.job?.company || job?.company,
+          url: json.job?.url || job?.url,
+          tailoredCvText: json.tailoredCvText,
+        });
+        setMessage(
+          json.error ||
+            "לא ניתן להגיש מהשרת — נפתח מילוי מהקו״ח. פתח את האתר והשתמש בבוקמרקלט.",
+        );
+        if (job?.url || json.job?.url) {
+          const open = safeJobOpenUrl({
+            url: json.job?.url || job?.url,
+            title: json.job?.title || job?.title,
+            source: job?.source,
+            channel: job?.channel,
+            external_id: job?.external_id,
+          });
+          if (open) window.open(open, "_blank", "noopener,noreferrer");
+        }
+        setTab("cv");
+        await loadMatches(resume?.id);
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");
+      } finally {
+        setAutoApplyBusyId(null);
+      }
+    },
+    [resume, loadMatches, loadApplications],
+  );
 
   async function handleUploaded(
     next: Resume,
@@ -202,7 +254,7 @@ export function HomeClient({ email }: { email?: string | null }) {
         loadApplications(json.resume?.id || resume?.id),
       ]);
       setMessage(
-        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · נשלח: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
+        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
       );
       setTab("pool");
     } catch (err) {
@@ -237,8 +289,8 @@ export function HomeClient({ email }: { email?: string | null }) {
                 סוכן המשרות שלך בישראל
               </h1>
               <p className="max-w-md text-sm leading-relaxed text-[var(--muted)]">
-                סורק LinkedIn ולוחות דרושים, מתאים לקו״ח, ושולח או פותח הגשה —
-                הכל במקום אחד.
+                סורק LinkedIn ולוחות דרושים, מתאים לקו״ח, שולח במייל או מגיש
+                אוטומטית בטופס האתר — הכל במקום אחד.
               </p>
             </header>
 
@@ -261,7 +313,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 <p className="text-2xl font-semibold text-[var(--accent)]">
                   {sentCount}
                 </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">נשלח</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">הוגש</p>
               </button>
               <button
                 type="button"
@@ -271,7 +323,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 <p className="text-2xl font-semibold text-[var(--accent)]">
                   {openedCount}
                 </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">נפתח</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">הוסר</p>
               </button>
             </div>
 
@@ -285,7 +337,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 {pipelineBusy
                   ? "רץ…"
                   : resume
-                    ? "הפעל סריקה + שליחה"
+                    ? "הפעל סריקה + הגשה אוטומטית"
                     : "העלה קו״ח כדי להתחיל"}
               </button>
               {!resume && (
@@ -312,7 +364,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  עד 50 משרות · סינון לפי סוג, תאריך ומיקום · החדשה ביותר קודם
+                  עד 50 · פתיחת קישור לא מסירה מהפול · ״הסר מהפול״ להעברה להיסטוריה
                 </p>
               </div>
               <div className="flex gap-2">
@@ -339,10 +391,12 @@ export function HomeClient({ email }: { email?: string | null }) {
             <MatchList
               matches={matches}
               loading={loadingMatches}
-              onOpenJobLink={(jobId, matchId) => {
+              onDismissFromPool={(jobId, matchId) => {
                 void markJobOpened(jobId, matchId);
               }}
               onPrepareApply={prepareApplyFromMatch}
+              onAutoApply={(m) => void autoApplyFromMatch(m)}
+              autoApplyBusyId={autoApplyBusyId}
             />
           </section>
         )}
@@ -352,7 +406,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">היסטוריה</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  רק שליחה למייל מעסיק אמיתי או פתיחת קישור
+                  מייל מעסיק · הגשה באתר · פתיחת קישור
                 </p>
             </div>
             <ApplicationReport
@@ -360,17 +414,6 @@ export function HomeClient({ email }: { email?: string | null }) {
               loading={loadingApps}
               resume={resume}
               summary={summary}
-              onOpenJobLink={(jobId) => {
-                const app = applications.find((a) => a.job_id === jobId);
-                setAutofillJob({
-                  jobId,
-                  title: app?.jobs?.title,
-                  company: app?.jobs?.company,
-                  url: app?.jobs?.url,
-                  tailoredCvText: app?.tailored_cv_text,
-                });
-                void markJobOpened(jobId, app?.match_id || undefined);
-              }}
             />
           </section>
         )}

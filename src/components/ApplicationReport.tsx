@@ -6,6 +6,7 @@ import {
   wasLinkOpened,
   wasSentToRealEmployer,
 } from "@/lib/apply-email";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
 import type { Application, Resume } from "@/lib/types";
 
 type Props = {
@@ -25,8 +26,11 @@ type Props = {
 };
 
 function statusLabel(app: Application): string {
+  if (app.status === "sent" && app.method === "web-form") {
+    return "הוגש באתר";
+  }
   if (wasSentToRealEmployer(app)) return "נשלח למעסיק";
-  if (wasLinkOpened(app)) return "נפתח";
+  if (wasLinkOpened(app)) return "הוסר מהפול";
   return "";
 }
 
@@ -41,25 +45,32 @@ function ApplicationCard({
 }) {
   const job = app.jobs;
   const sent = wasSentToRealEmployer(app);
-  const opened = wasLinkOpened(app);
-  const employerEmail = sent ? job?.apply_email : null;
+  const webForm = app.status === "sent" && app.method === "web-form";
+  const employerEmail = sent && !webForm ? job?.apply_email : null;
+  const openUrl = safeJobOpenUrl({
+    url: job?.url,
+    title: job?.title,
+    source: job?.source,
+    channel: job?.channel,
+    external_id: job?.external_id,
+  });
 
   return (
     <li className="space-y-2 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="font-semibold">
-          {job?.url ? (
+          {openUrl ? (
             <a
-              href={job.url}
+              href={openUrl}
               target="_blank"
               rel="noreferrer"
               className="hover:text-[var(--accent)]"
               onClick={() => {
-                if (job.id) onOpenJobLink?.(job.id);
+                if (job?.id) onOpenJobLink?.(job.id);
               }}
             >
-              {job.title}
-              {job.company ? ` · ${job.company}` : ""}
+              {job?.title}
+              {job?.company ? ` · ${job.company}` : ""}
             </a>
           ) : (
             <>
@@ -75,13 +86,19 @@ function ApplicationCard({
       <p className="text-xs text-[var(--muted)]">
         {[job?.location, job?.channel || job?.source].filter(Boolean).join(" · ")}
       </p>
+      {webForm && (
+        <p className="text-sm text-[var(--foreground)]/85">
+          הוגש אוטומטית בטופס ההגשה באתר המעסיק
+          {app.skip_reason ? ` — ${app.skip_reason}` : ""}.
+        </p>
+      )}
       {sent && employerEmail && (
         <p className="text-sm text-[var(--foreground)]/85">
           <span className="font-medium">נשלח אל מייל המעסיק: </span>
           {employerEmail}
         </p>
       )}
-      {sent && (
+      {sent && !webForm && (
         <p className="text-xs text-[var(--muted)]">
           המעסיק יכול להשיב ישירות למייל שלך (Reply-To).
         </p>
@@ -92,15 +109,15 @@ function ApplicationCard({
           {app.recruiter_insights}
         </p>
       )}
-      {job?.url && (
+      {openUrl && (
         <p className="text-sm">
           <a
-            href={job.url}
+            href={openUrl}
             target="_blank"
             rel="noreferrer"
             className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
             onClick={() => {
-              if (job.id) onOpenJobLink?.(job.id);
+              if (job?.id) onOpenJobLink?.(job.id);
             }}
           >
             פתח טופס הגשה באתר ↗
@@ -120,7 +137,7 @@ function ApplicationCard({
               resumeId={resume.id}
               jobTitle={job?.title}
               jobCompany={job?.company}
-              jobUrl={job?.url}
+              jobUrl={openUrl}
               tailoredCvText={app.tailored_cv_text}
               compact
             />
@@ -189,7 +206,7 @@ export function ApplicationReport({
       <div className="flex flex-wrap gap-3 text-sm text-[var(--muted)]">
         <span>בהיסטוריה: {history.length}</span>
         <span className="font-medium text-[var(--accent)]">
-          נשלח למעסיק: {sentCount}
+          נשלח/הוגש: {sentCount}
         </span>
         <span className="font-medium text-[var(--accent)]">
           נפתח: {openedCount}
@@ -198,19 +215,19 @@ export function ApplicationReport({
 
       {history.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין היסטוריה. כאן יופיעו רק משרות שנשלחו למייל מעסיק אמיתי, או
-          שנפתח הקישור שלהן מהפול.
+          עדיין אין היסטוריה. כאן יופיעו משרות שנשלחו למייל מעסיק, שהוגשו
+          אוטומטית בטופס באתר, או שהוסרו מהפול ידנית.
         </p>
       ) : (
         <>
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              נשלח למייל מעסיק ({sentApps.length})
+              הוגש למעסיק ({sentApps.length})
             </h3>
             {sentApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                עדיין אין שליחות למייל מעסיק אמיתי. כשאין מייל בהגשה — השתמשו
-                בפתיחת הקישור ובמילוי ידני.
+                עדיין אין הגשות. כשיש מייל מעסיק — נשלח במייל; כשיש טופס
+                Greenhouse/Lever/Ashby — מגישים אוטומטית באתר.
               </p>
             ) : (
               <AppList
@@ -223,11 +240,11 @@ export function ApplicationReport({
 
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              נפתח קישור ({openedApps.length})
+              הוסר מהפול ({openedApps.length})
             </h3>
             {openedApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                עדיין לא נפתח אף קישור מהפול.
+                משרות שהוסרו מהפול ידנית (״הסר מהפול״).
               </p>
             ) : (
               <AppList

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
 import {
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
@@ -16,8 +17,11 @@ import {
 type Props = {
   matches: JobMatch[];
   loading: boolean;
-  onOpenJobLink?: (jobId: string, matchId: string) => void;
+  /** Explicitly remove from pool (not on mere link open). */
+  onDismissFromPool?: (jobId: string, matchId: string) => void;
   onPrepareApply?: (match: JobMatch) => void;
+  onAutoApply?: (match: JobMatch) => void;
+  autoApplyBusyId?: string | null;
 };
 
 function scoreLabel(score: number) {
@@ -66,8 +70,10 @@ const selectClass =
 export function MatchList({
   matches,
   loading,
-  onOpenJobLink,
+  onDismissFromPool,
   onPrepareApply,
+  onAutoApply,
+  autoApplyBusyId = null,
 }: Props) {
   const [filters, setFilters] = useState<MatchPoolFilters>(DEFAULT_POOL_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -245,8 +251,8 @@ export function MatchList({
 
       {matches.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין משרות בפול. לחץ ״הפעל סריקה + שליחה״. משרות שנשלחו או שנפתח
-          הקישור שלהן עוברות להיסטוריה.
+          עדיין אין משרות בפול. לחץ ״הפעל סריקה + הגשה אוטומטית״. משרות שהוגשו
+          או שהוסרו מהפול יורדות להיסטוריה. פתיחת קישור לבד לא מסירה מהפול.
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
@@ -257,22 +263,25 @@ export function MatchList({
           {filtered.map((match) => {
             const job = match.jobs;
             const badge = kindLabel(job);
-            const markOpened = () => {
-              if (job?.id) onOpenJobLink?.(job.id, match.id);
-            };
+            const openUrl = safeJobOpenUrl({
+              url: job?.url,
+              title: job?.title,
+              source: job?.source,
+              channel: job?.channel,
+              external_id: job?.external_id,
+            });
             return (
               <li key={match.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="text-lg font-semibold tracking-tight">
-                    {job?.url ? (
+                    {openUrl ? (
                       <a
-                        href={job.url}
+                        href={openUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="hover:text-[var(--accent)]"
-                        onClick={markOpened}
                       >
-                        {job.title}
+                        {job?.title ?? "משרה"}
                       </a>
                     ) : (
                       (job?.title ?? "משרה ללא כותרת")
@@ -301,21 +310,47 @@ export function MatchList({
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
+                    onClick={() => onAutoApply?.(match)}
+                    disabled={autoApplyBusyId === (job?.id || match.job_id)}
+                    className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                  >
+                    {autoApplyBusyId === (job?.id || match.job_id)
+                      ? "מגיש…"
+                      : "הגש אוטומטית"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onPrepareApply?.(match)}
-                    className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+                    className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
                   >
                     מלא טופס מהקו״ח
                   </button>
-                  {job?.url && (
+                  {openUrl ? (
                     <a
-                      href={job.url}
+                      href={openUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
-                      onClick={markOpened}
                     >
                       פתח באתר ↗
                     </a>
+                  ) : (
+                    /telegram|facebook/i.test(
+                      `${job?.channel || ""} ${job?.source || ""}`,
+                    ) && (
+                      <span className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)]">
+                        אין קישור תקין (פוסט דמו)
+                      </span>
+                    )
+                  )}
+                  {job?.id && (
+                    <button
+                      type="button"
+                      onClick={() => onDismissFromPool?.(job.id, match.id)}
+                      className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)] underline-offset-2 hover:underline"
+                    >
+                      הסר מהפול
+                    </button>
                   )}
                 </div>
               </li>
