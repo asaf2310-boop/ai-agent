@@ -54,32 +54,166 @@ function cleanPhone(raw: string): string {
   return raw.replace(/[^\d+]/g, "").replace(/^972/, "+972");
 }
 
-function guessName(text: string): { fullName: string | null; firstName: string | null; lastName: string | null } {
+const NAME_STOP =
+  /^(resume|curriculum|vitae|cv|קורות|ניסיון|השכלה|skills|summary|profile|objective|contact|פרטים|יצירת.?קשר|טלפון|מייל|email|phone|mobile|address|linkedin|github|portfolio)/i;
+
+const JOB_TITLE_HINT =
+  /\b(engineer|developer|manager|director|analyst|designer|consultant|architect|lead|senior|junior|intern|founder|ceo|cto|cfo|product|marketing|sales|operations|מנהל|מהנדס|מפתח|יועץ|אנליסט|מעצב|סטודנט)\b/i;
+
+/** Strip role / contact junk that often rides on the same line as the name. */
+function isolateNameCandidate(line: string): string {
+  let s = line.trim();
+  // "Name: …" / "שם מלא – …"
+  s = s.replace(
+    /^(?:full\s*)?name\s*[:\-–—]|שם(?:\s*מלא)?\s*[:\-–—]\s*/i,
+    "",
+  );
+  // Take left side of common separators before a title
+  for (const sep of ["|", "•", "·", " – ", " — ", " - ", " –", "—"]) {
+    if (s.includes(sep)) {
+      const left = s.split(sep)[0]?.trim() || "";
+      if (left.length >= 2) s = left;
+    }
+  }
+  // Drop trailing , City or , Israel
+  s = s.replace(/,\s*(israel|ישראל|tel aviv|תל אביב|jerusalem|ירושלים).*$/i, "");
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function isPlausibleName(line: string): boolean {
+  if (!line || line.length < 2 || line.length > 70) return false;
+  if (EMAIL_RE.test(line) || PHONE_RE.test(line)) return false;
+  if (/https?:\/\/|www\.|linkedin|github|@/i.test(line)) return false;
+  if (NAME_STOP.test(line)) return false;
+  // City / country alone is not a person name
+  const lower = line.toLowerCase().replace(/ת״א/g, "תל אביב");
+  if (
+    IL_CITIES.some((c) => c.toLowerCase() === lower) ||
+    /^(israel|ישראל|remote|היברידי|hybrid)$/i.test(line)
+  ) {
+    return false;
+  }
+  // Mostly letters (Hebrew/Latin), spaces, hyphens, apostrophes, geresh
+  if (!/^[\u0590-\u05FFa-zA-Z][\u0590-\u05FFa-zA-Z\s'\u05F3\u2019.-]{0,68}$/.test(line)) {
+    return false;
+  }
+  // Reject lines that look like a job title alone
+  if (JOB_TITLE_HINT.test(line)) {
+    const hasHebrew = /[\u0590-\u05FF]/.test(line);
+    const hasLatinNameShape = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}$/.test(line);
+    if (!hasHebrew && !hasLatinNameShape) return false;
+    if (hasLatinNameShape && JOB_TITLE_HINT.test(line)) return false;
+  }
+  return true;
+}
+
+function splitNameParts(full: string): {
+  fullName: string;
+  firstName: string;
+  lastName: string | null;
+} {
+  const parts = full.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { fullName: full, firstName: parts[0], lastName: null };
+  }
+  // Hebrew often written first-last; English too. Keep first token as first name.
+  return {
+    fullName: full,
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function nameFromLabeledFields(text: string): {
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+} | null {
+  const first =
+    text.match(
+      /(?:שם\s*פרטי|first\s*name|given\s*name)\s*[:\-–—]\s*([^\n,|]{2,40})/i,
+    )?.[1]?.trim() || null;
+  const last =
+    text.match(
+      /(?:שם\s*משפחה|last\s*name|family\s*name|surname)\s*[:\-–—]\s*([^\n,|]{2,40})/i,
+    )?.[1]?.trim() || null;
+  const fullLabeled =
+    text.match(
+      /(?:שם\s*מלא|full\s*name|שם)\s*[:\-–—]\s*([^\n|]{2,60})/i,
+    )?.[1]?.trim() || null;
+
+  if (first || last) {
+    const f = first ? isolateNameCandidate(first) : null;
+    const l = last ? isolateNameCandidate(last) : null;
+    if (f || l) {
+      const full = [f, l].filter(Boolean).join(" ");
+      return {
+        fullName: full || null,
+        firstName: f,
+        lastName: l,
+      };
+    }
+  }
+  if (fullLabeled) {
+    const cleaned = isolateNameCandidate(fullLabeled);
+    if (isPlausibleName(cleaned)) return splitNameParts(cleaned);
+  }
+  return null;
+}
+
+function nameFromEmail(email: string | null): {
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+} | null {
+  if (!email) return null;
+  const local = email.split("@")[0] || "";
+  // asaf.cohen / asaf_cohen / asaf-cohen
+  const m = local.match(/^([a-zA-Z\u0590-\u05FF]{2,})[._-]([a-zA-Z\u0590-\u05FF]{2,})$/);
+  if (!m) return null;
+  const cap = (s: string) =>
+    /[\u0590-\u05FF]/.test(s) ? s : s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  const firstName = cap(m[1]);
+  const lastName = cap(m[2]);
+  return {
+    fullName: `${firstName} ${lastName}`,
+    firstName,
+    lastName,
+  };
+}
+
+function guessName(text: string): {
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+} {
+  const labeled = nameFromLabeledFields(text);
+  if (labeled?.fullName || labeled?.firstName) return labeled;
+
+  const email = text.match(EMAIL_RE)?.[0]?.toLowerCase() || null;
+  const fromEmail = nameFromEmail(email);
+
   const lines = text
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
-  // Prefer a short Hebrew/English name-like first line
-  for (const line of lines.slice(0, 8)) {
-    if (EMAIL_RE.test(line) || PHONE_RE.test(line) || /http|www\.|linkedin/i.test(line)) {
-      continue;
+
+  // Prefer early lines (header of CV), after stripping titles
+  for (const rawLine of lines.slice(0, 20)) {
+    const line = isolateNameCandidate(rawLine);
+    if (!isPlausibleName(line)) continue;
+    const parts = line.split(/\s+/).filter(Boolean);
+    // Prefer 2–4 tokens (first + last). Single token only if no email-derived name.
+    if (parts.length >= 2 && parts.length <= 4) {
+      return splitNameParts(line);
     }
-    if (line.length < 3 || line.length > 60) continue;
-    if (/^(resume|curriculum|cv|קורות|ניסיון|השכלה|skills|summary)/i.test(line)) {
-      continue;
-    }
-    // 2–4 words, letters only (Hebrew/Latin)
-    if (/^[\u0590-\u05FFa-zA-Z][\u0590-\u05FFa-zA-Z\s'-]{1,50}$/.test(line)) {
-      const parts = line.split(/\s+/).filter(Boolean);
-      if (parts.length >= 2 && parts.length <= 4) {
-        return {
-          fullName: line,
-          firstName: parts[0],
-          lastName: parts.slice(1).join(" "),
-        };
-      }
+    if (parts.length === 1 && !fromEmail && lines.indexOf(rawLine) <= 2) {
+      return splitNameParts(line);
     }
   }
+
+  if (fromEmail) return fromEmail;
+
   return { fullName: null, firstName: null, lastName: null };
 }
 
@@ -169,23 +303,43 @@ export function buildAutofillFields(
     "input[name*=full_name i]",
     "input[name*=fullname i]",
     "input[name*=fullnameName i]",
+    "input[name*=candidate_name i]",
     "input[id*=full_name i]",
-    "input[id*=name i]",
+    "input[id*=fullname i]",
+    "input[placeholder*=שם מלא i]",
+    "input[placeholder*=full name i]",
     "input[placeholder*=שם i]",
+    "input[aria-label*=שם מלא i]",
     "input[aria-label*=שם i]",
+    "input[aria-label*=full name i]",
     "input[autocomplete=name]",
   ]);
   push("firstName", "שם פרטי", profile.firstName, [
-    "input[name*=first i]",
+    "input[name*=first_name i]",
+    "input[name*=firstname i]",
+    "input[name*=firstName i]",
     "input[name*=fname i]",
+    "input[name*=given i]",
+    "input[id*=first i]",
     "input[autocomplete=given-name]",
     "input[placeholder*=פרטי i]",
+    "input[placeholder*=first name i]",
+    "input[aria-label*=פרטי i]",
+    "input[aria-label*=first name i]",
   ]);
   push("lastName", "שם משפחה", profile.lastName, [
-    "input[name*=last i]",
+    "input[name*=last_name i]",
+    "input[name*=lastname i]",
+    "input[name*=lastName i]",
     "input[name*=lname i]",
+    "input[name*=surname i]",
+    "input[name*=family i]",
+    "input[id*=last i]",
     "input[autocomplete=family-name]",
     "input[placeholder*=משפחה i]",
+    "input[placeholder*=last name i]",
+    "input[aria-label*=משפחה i]",
+    "input[aria-label*=last name i]",
   ]);
   push("email", "אימייל", profile.email, [
     "input[type=email]",
