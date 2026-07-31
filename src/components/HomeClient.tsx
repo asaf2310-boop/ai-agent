@@ -262,9 +262,14 @@ export function HomeClient() {
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">
-            {resume ? "3" : "2"}. פול התאמות
-          </h2>
+          <div>
+            <h2 className="text-xl font-semibold">
+              {resume ? "3" : "2"}. פול התאמות
+            </h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              עד 50 משרות, מהחדשה ביותר — סינון לפי סוג, תאריך פרסום ומיקום
+            </p>
+          </div>
           <div className="flex gap-2">
             <button
               type="button"

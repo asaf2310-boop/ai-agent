@@ -1,7 +1,36 @@
 import { NextResponse } from "next/server";
 import { isClearedFromPool } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import {
+  buildPoolMatches,
+  sortMatchesByNewest,
+  uniqueLocations,
+  type MatchPoolFilters,
+} from "@/lib/match-pool";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+function parseFilters(searchParams: URLSearchParams): MatchPoolFilters {
+  const kind = (searchParams.get("kind") || "all") as MatchPoolFilters["kind"];
+  const postedWithin = (searchParams.get("postedWithin") ||
+    "all") as MatchPoolFilters["postedWithin"];
+  const allowedKinds = new Set([
+    "all",
+    "job",
+    "freelance",
+    "social",
+    "linkedin",
+    "board",
+  ]);
+  const allowedWithin = new Set(["all", "1", "3", "7", "30", "custom"]);
+
+  return {
+    kind: allowedKinds.has(kind) ? kind : "all",
+    location: searchParams.get("location") || "",
+    postedWithin: allowedWithin.has(postedWithin) ? postedWithin : "all",
+    postedFrom: searchParams.get("postedFrom") || "",
+    postedTo: searchParams.get("postedTo") || "",
+  };
+}
 
 /** Active pool: matches not yet sent and not yet opened via link. */
 export async function GET(request: Request) {
@@ -11,6 +40,13 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const resumeId = searchParams.get("resumeId");
+    const filters = parseFilters(searchParams);
+    const applyServerFilters =
+      searchParams.has("kind") ||
+      searchParams.has("location") ||
+      searchParams.has("postedWithin") ||
+      searchParams.has("postedFrom") ||
+      searchParams.has("postedTo");
     const minScore = Number(
       searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.2",
     );
@@ -23,7 +59,7 @@ export async function GET(request: Request) {
       .eq("user_id", user.id)
       .gte("score", minScore)
       .order("score", { ascending: false })
-      .limit(80);
+      .limit(400);
 
     if (resumeId) {
       query = query.eq("resume_id", resumeId);
@@ -38,7 +74,7 @@ export async function GET(request: Request) {
         .eq("resume_id", resumeId)
         .gte("score", minScore)
         .order("score", { ascending: false })
-        .limit(80);
+        .limit(400);
       data = fallback.data;
       error = fallback.error;
     } else if (error && /user_id/i.test(error.message)) {
@@ -59,7 +95,7 @@ export async function GET(request: Request) {
         .eq("resume_id", resumeId)
         .gte("score", minScore)
         .order("score", { ascending: false })
-        .limit(80);
+        .limit(400);
       data = byResume;
     }
 
@@ -84,12 +120,20 @@ export async function GET(request: Request) {
       // if applications query fails, return unfiltered matches
     }
 
-    const pool = matches.filter((m) => !clearedJobIds.has(m.job_id));
+    const available = sortMatchesByNewest(
+      matches.filter((m) => !clearedJobIds.has(m.job_id)),
+    );
+
+    const pool = applyServerFilters
+      ? buildPoolMatches(available, filters)
+      : available;
 
     return NextResponse.json({
       matches: pool,
-      poolCount: pool.length,
-      hiddenClearedCount: matches.length - pool.length,
+      locations: uniqueLocations(available),
+      poolCount: available.length,
+      shown: applyServerFilters ? pool.length : Math.min(pool.length, 50),
+      hiddenClearedCount: matches.length - available.length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load matches";
