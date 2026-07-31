@@ -42,10 +42,7 @@ export function HomeClient({ email }: { email?: string | null }) {
     tailoredCvText?: string | null;
   } | null>(null);
 
-  const pendingCount = useMemo(
-    () => applications.filter((a) => a.status === "failed").length,
-    [applications],
-  );
+  const pendingCount = useMemo(() => 0, []);
 
   const poolShownCount = useMemo(
     () => Math.min(matches.length, 50),
@@ -355,7 +352,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">היסטוריה</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  רק נשלח למעסיק / נפתח קישור / שגיאות שליחה
+                  רק שליחה למייל מעסיק אמיתי או פתיחת קישור
                 </p>
             </div>
             <ApplicationReport

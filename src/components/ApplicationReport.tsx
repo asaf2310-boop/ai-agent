@@ -2,8 +2,9 @@
 
 import { AutofillKit } from "@/components/AutofillKit";
 import {
+  isHistoryEntry,
   wasLinkOpened,
-  wasSentToEmployer,
+  wasSentToRealEmployer,
 } from "@/lib/apply-email";
 import type { Application, Resume } from "@/lib/types";
 
@@ -24,10 +25,9 @@ type Props = {
 };
 
 function statusLabel(app: Application): string {
-  if (wasSentToEmployer(app)) return "נשלח";
+  if (wasSentToRealEmployer(app)) return "נשלח למעסיק";
   if (wasLinkOpened(app)) return "נפתח";
-  if (app.status === "failed") return "שגיאה";
-  return "לא נשלח";
+  return "";
 }
 
 function ApplicationCard({
@@ -40,9 +40,9 @@ function ApplicationCard({
   onOpenJobLink?: (jobId: string) => void;
 }) {
   const job = app.jobs;
-  const sent = wasSentToEmployer(app);
+  const sent = wasSentToRealEmployer(app);
   const opened = wasLinkOpened(app);
-  const employerEmail = job?.apply_email;
+  const employerEmail = sent ? job?.apply_email : null;
 
   return (
     <li className="space-y-2 py-4">
@@ -68,11 +68,7 @@ function ApplicationCard({
             </>
           )}
         </h3>
-        <span
-          className={`text-sm font-medium ${
-            sent || opened ? "text-[var(--accent)]" : "text-[var(--muted)]"
-          }`}
-        >
+        <span className="text-sm font-medium text-[var(--accent)]">
           {statusLabel(app)}
         </span>
       </div>
@@ -81,8 +77,13 @@ function ApplicationCard({
       </p>
       {sent && employerEmail && (
         <p className="text-sm text-[var(--foreground)]/85">
-          <span className="font-medium">נשלח אל המעסיק: </span>
+          <span className="font-medium">נשלח אל מייל המעסיק: </span>
           {employerEmail}
+        </p>
+      )}
+      {sent && (
+        <p className="text-xs text-[var(--muted)]">
+          המעסיק יכול להשיב ישירות למייל שלך (Reply-To).
         </p>
       )}
       {app.recruiter_insights && (
@@ -105,19 +106,6 @@ function ApplicationCard({
             פתח טופס הגשה באתר ↗
           </a>
         </p>
-      )}
-      {app.skip_reason && (
-        <p className="text-sm text-[var(--muted)]">{app.skip_reason}</p>
-      )}
-      {app.error && (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-red-700">
-            פרטי שגיאה טכניים
-          </summary>
-          <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all text-xs text-red-700/90">
-            {app.error}
-          </pre>
-        </details>
       )}
 
       {resume && (
@@ -177,14 +165,6 @@ function AppList({
   );
 }
 
-function isHistoryWorthy(app: Application): boolean {
-  return (
-    wasSentToEmployer(app) ||
-    wasLinkOpened(app) ||
-    app.status === "failed"
-  );
-}
-
 export function ApplicationReport({
   applications,
   loading,
@@ -196,14 +176,10 @@ export function ApplicationReport({
     return <p className="text-sm text-[var(--muted)]">טוען דוח…</p>;
   }
 
-  const history = applications.filter(isHistoryWorthy);
-  const sentApps = history.filter((a) => wasSentToEmployer(a));
+  const history = applications.filter(isHistoryEntry);
+  const sentApps = history.filter((a) => wasSentToRealEmployer(a));
   const openedApps = history.filter(
-    (a) => wasLinkOpened(a) && !wasSentToEmployer(a),
-  );
-  const failedApps = history.filter(
-    (a) =>
-      a.status === "failed" && !wasSentToEmployer(a) && !wasLinkOpened(a),
+    (a) => wasLinkOpened(a) && !wasSentToRealEmployer(a),
   );
   const sentCount = summary?.sent ?? sentApps.length;
   const openedCount = summary?.opened ?? openedApps.length;
@@ -213,30 +189,29 @@ export function ApplicationReport({
       <div className="flex flex-wrap gap-3 text-sm text-[var(--muted)]">
         <span>בהיסטוריה: {history.length}</span>
         <span className="font-medium text-[var(--accent)]">
-          נשלח: {sentCount}
+          נשלח למעסיק: {sentCount}
         </span>
         <span className="font-medium text-[var(--accent)]">
           נפתח: {openedCount}
         </span>
-        {failedApps.length > 0 && (
-          <span className="font-medium text-red-700">
-            שגיאות: {failedApps.length}
-          </span>
-        )}
       </div>
 
       {history.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין היסטוריה. אחרי שליחה למעסיק או פתיחת קישור — המשרה תופיע כאן.
+          עדיין אין היסטוריה. כאן יופיעו רק משרות שנשלחו למייל מעסיק אמיתי, או
+          שנפתח הקישור שלהן מהפול.
         </p>
       ) : (
         <>
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              נשלח למעסיק ({sentApps.length})
+              נשלח למייל מעסיק ({sentApps.length})
             </h3>
             {sentApps.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">עדיין אין שליחות מייל.</p>
+              <p className="text-sm text-[var(--muted)]">
+                עדיין אין שליחות למייל מעסיק אמיתי. כשאין מייל בהגשה — השתמשו
+                בפתיחת הקישור ובמילוי ידני.
+              </p>
             ) : (
               <AppList
                 apps={sentApps}
@@ -262,19 +237,6 @@ export function ApplicationReport({
               />
             )}
           </section>
-
-          {failedApps.length > 0 && (
-            <section className="space-y-2">
-              <h3 className="text-lg font-semibold text-red-700">
-                שגיאות שליחה ({failedApps.length})
-              </h3>
-              <AppList
-                apps={failedApps}
-                resume={resume}
-                onOpenJobLink={onOpenJobLink}
-              />
-            </section>
-          )}
         </>
       )}
     </div>
