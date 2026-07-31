@@ -67,8 +67,22 @@ export async function POST(request: Request) {
     const current = existing?.[0];
     if (current && wasSentToEmployer(current)) {
       return NextResponse.json({
+        ok: true,
         application: current,
         alreadySent: true,
+        clearedFromPool: true,
+        detail: "המשרה כבר הוגשה — מופיעה בהיסטוריה",
+      });
+    }
+
+    // Already dismissed — idempotent success
+    if (current && current.method === "link-opened") {
+      return NextResponse.json({
+        ok: true,
+        application: current,
+        clearedFromPool: true,
+        learned: true,
+        detail: "כבר הוסר מהפול",
       });
     }
 
@@ -82,7 +96,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Drop this match so it won't reappear until a full re-score brings it back
+    // Drop this match so it won't reappear on the next pool load
     try {
       await supabase
         .from("job_matches")
@@ -93,11 +107,13 @@ export async function POST(request: Request) {
       // best-effort
     }
 
+    // status=skipped + method=link-opened: cleared from pool + history,
+    // and must NOT be treated as junk (see isJunkApplicationRow).
     const row = {
       resume_id: resumeId,
       job_id: body.jobId,
       match_id: body.matchId || current?.match_id || null,
-      status: "prepared" as const,
+      status: "skipped" as const,
       method: "link-opened",
       skip_reason:
         "לא מעוניין — הוסר מהפול. המערכת תלמד לא להציע משרות דומות",
@@ -119,6 +135,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
+      ok: true,
       application: data,
       clearedFromPool: isClearedFromPool(data),
       learned: true,
