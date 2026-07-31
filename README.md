@@ -15,10 +15,11 @@ Next.js on Vercel, Supabase for data/storage, GitHub Actions for twice-daily ref
 
 ### 1. Supabase
 
-Run both migrations in the SQL Editor:
+Run migrations in the SQL Editor:
 
 1. `supabase/migrations/001_job_agent_schema.sql`
 2. `supabase/migrations/002_applications_and_tailoring.sql`
+3. `supabase/migrations/003_social_freelance_posts.sql`
 
 Then **Settings → API → Exposed schemas** — add `job_agent`.
 
@@ -48,8 +49,9 @@ Same as above (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `R
 ## Flow
 
 1. Upload CV → extract text (DOCX/PDF/TXT) → store in Supabase.
-2. Seed sample jobs if empty → score matches → rewrite CV per job → attempt send.
-3. UI shows matches + report (`sent` / `prepared` / `skipped` / `failed`).
-4. Actions runs ~08:00 and ~20:00 Israel time.
+2. Seed jobs + social/freelance posts (RemoteOK + samples; optional RSS via `SOCIAL_RSS_URLS`).
+3. Score matches → rewrite CV → email apply / **link-alert** for social posts.
+4. UI shows matches with “פתח פוסט” links + application report.
+5. Actions runs ~08:00 and ~20:00 Israel time.
 
 Without Resend, applications stay **prepared** (tailored CV saved in the report) instead of emailed.
