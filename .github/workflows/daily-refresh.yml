@@ -36,6 +36,7 @@ jobs:
           MIN_MATCH_SCORE: "0.3"
           MAX_JOB_AGE_DAYS: "7"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           APPLICATION_NOTIFY_EMAIL: ${{ secrets.APPLICATION_NOTIFY_EMAIL }}
           APPLICATION_FROM_EMAIL: ${{ secrets.APPLICATION_FROM_EMAIL }}

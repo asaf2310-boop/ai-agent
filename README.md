@@ -38,9 +38,10 @@ npm run dev
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NEXT_PUBLIC_SUPABASE_SCHEMA=job_agent`
 - `NEXT_PUBLIC_SUPABASE_RESUME_BUCKET=job-agent-resumes`
-- `OPENAI_API_KEY` (recommended — CV rewrite)
+- `GROQ_API_KEY` (optional free AI rewrite) or nothing — **local rewrite works without any LLM key**
 - `RESEND_API_KEY` + `APPLICATION_NOTIFY_EMAIL` (real outbound sends)
 - `APPLICATION_FROM_EMAIL` (optional)
+- `OPENAI_API_KEY` is **not required** (often paid / rate-limited)
 
 ### 4. GitHub Actions secrets
 

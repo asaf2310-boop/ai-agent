@@ -189,29 +189,85 @@ def prune_old_jobs(client: Client, max_age_days: int) -> int:
     return len(result.data or [])
 
 
-def openai_tailor(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool]:
-    insights = f"המשרה מדגישה: {job.get('title')}. {(job.get('description') or '')[:220]}"
-    tailored = (
-        f"גרסת קו״ח מותאמת למשרה: {job.get('title')}\n\n"
-        f"סיכום ממוקד לפי הדרישות.\n\n{resume_text[:3500]}"
-    )
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return insights, tailored, False
+def local_tailor(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool]:
+    title = job.get("title") or "המשרה"
+    company = job.get("company") or ""
+    description = job.get("description") or ""
+    lexicon = [
+        "python", "javascript", "typescript", "react", "next.js", "node",
+        "fastapi", "django", "sql", "postgres", "supabase", "aws", "docker",
+        "kubernetes", "git", "linux", "java", "go", "html", "css", "tailwind",
+    ]
+    blob = f"{title} {description}".lower()
+    resume_l = resume_text.lower()
+    matched = [s for s in lexicon if s in blob and s in resume_l]
+    required = [s for s in lexicon if s in blob]
+    missing = [s for s in required if s not in matched]
 
+    insights = f'המשרה "{title}"' + (f" ב-{company}" if company else "") + " מדגישה: "
+    insights += ", ".join(required[:8]) if required else "ניסיון כללי בתפקיד"
+    insights += "."
+    if matched:
+        insights += f" התאמה מהקו״ח: {', '.join(matched[:8])}."
+    if missing:
+        insights += f" פערים אפשריים: {', '.join(missing[:6])}."
+
+    sentences = [s.strip() for s in re.split(r"[\n.!?]+", resume_text) if len(s.strip()) > 20]
+    relevant = []
+    for s in sentences:
+        sl = s.lower()
+        if any(m in sl for m in matched) or any(r in sl for r in required):
+            relevant.append(s)
+        if len(relevant) >= 10:
+            break
+    if len(relevant) < 3:
+        relevant = [p.strip() for p in resume_text.split("\n") if len(p.strip()) > 30][:8]
+
+    tailored = "\n".join(
+        [
+            f"קו״ח מותאם למשרה: {title}" + (f" · {company}" if company else ""),
+            "",
+            "סיכום ממוקד למגייס:",
+            "מועמד/ת עם התאמה לדרישות — ללא המצאת ניסיון.",
+            "",
+            "מיומנויות להדגשה:",
+            " · ".join(matched[:12] or required[:12] or ["—"]),
+            "",
+            "קטעים להבליט:",
+            *[f"• {s}" for s in relevant],
+            "",
+            "טיוטת פנייה:",
+            f'שלום, ראיתי את המשרה "{title}" והרקע שלי מתאים. אשמח לשתף קו״ח ולתאם שיחה.',
+            "",
+            "———",
+            "קו״ח מלא (מקור):",
+            resume_text[:4500],
+        ]
+    )
+    return insights, tailored, False
+
+
+def openai_compatible_tailor(
+    resume_text: str,
+    job: dict[str, Any],
+    *,
+    api_key: str,
+    url: str,
+    model: str,
+) -> tuple[str, str, bool] | None:
     payload = {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "temperature": 0.3,
+        "model": model,
+        "temperature": 0.2,
         "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "system",
-                "content": "Rewrite resumes for job fit. Return JSON with insights and tailored_cv.",
+                "content": "Rewrite resumes for job fit without inventing experience. Return JSON with insights and tailored_cv.",
             },
             {
                 "role": "user",
                 "content": (
-                    "החזר JSON: {\"insights\":\"...\",\"tailored_cv\":\"...\"}\n"
+                    'החזר JSON: {"insights":"...","tailored_cv":"..."}\n'
                     f"משרה: {job.get('title')}\nחברה: {job.get('company')}\n"
                     f"תיאור:\n{job.get('description')}\n\nקו״ח:\n{resume_text[:8000]}"
                 ),
@@ -219,7 +275,7 @@ def openai_tailor(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool
         ],
     }
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        url,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -232,13 +288,45 @@ def openai_tailor(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool
             data = json.loads(resp.read().decode("utf-8"))
         content = data["choices"][0]["message"]["content"]
         parsed = json.loads(content)
-        return (
-            parsed.get("insights") or insights,
-            parsed.get("tailored_cv") or tailored,
-            True,
-        )
+        return parsed.get("insights") or "", parsed.get("tailored_cv") or "", True
     except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
-        return insights, tailored, False
+        return None
+
+
+def tailor_resume(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool]:
+    """Prefer local (free). Optional Groq free tier, then OpenAI if configured."""
+    base = local_tailor(resume_text, job)
+
+    groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key:
+        result = openai_compatible_tailor(
+            resume_text,
+            job,
+            api_key=groq_key,
+            url="https://api.groq.com/openai/v1/chat/completions",
+            model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+        )
+        if result and (result[0] or result[1]):
+            return result[0] or base[0], result[1] or base[1], True
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
+        result = openai_compatible_tailor(
+            resume_text,
+            job,
+            api_key=openai_key,
+            url="https://api.openai.com/v1/chat/completions",
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        )
+        if result and (result[0] or result[1]):
+            return result[0] or base[0], result[1] or base[1], True
+
+    return base
+
+
+def openai_tailor(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool]:
+    # Backward-compatible name used by process_applications
+    return tailor_resume(resume_text, job)
 
 
 def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str | None, str]:
