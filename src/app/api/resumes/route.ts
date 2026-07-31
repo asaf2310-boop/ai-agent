@@ -1,35 +1,15 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  ensureSampleJobs,
+  matchResumeToJobs,
+  processApplicationsForResume,
+} from "@/lib/pipeline";
+import { extractResumeText, extractSkills } from "@/lib/resume-extract";
+import type { Resume } from "@/lib/types";
 
 const BUCKET =
   process.env.NEXT_PUBLIC_SUPABASE_RESUME_BUCKET || "job-agent-resumes";
-
-function extractSkills(text: string): string[] {
-  const known = [
-    "python",
-    "javascript",
-    "typescript",
-    "react",
-    "next.js",
-    "node",
-    "fastapi",
-    "django",
-    "sql",
-    "postgres",
-    "supabase",
-    "aws",
-    "docker",
-    "kubernetes",
-    "git",
-    "linux",
-    "java",
-    "c#",
-    "go",
-    "rust",
-  ];
-  const lower = text.toLowerCase();
-  return known.filter((skill) => lower.includes(skill));
-}
 
 export async function POST(request: Request) {
   try {
@@ -70,29 +50,60 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: uploadError.message }, { status: 500 });
     }
 
-    let extractedText: string | null = null;
-    if (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt")) {
-      extractedText = bytes.toString("utf-8");
-    }
-
+    const extractedText = await extractResumeText(
+      bytes,
+      file.name,
+      file.type || "",
+    );
     const skills = extractedText ? extractSkills(extractedText) : [];
 
-    const { data, error } = await supabase
+    // Mark previous resumes inactive (column added in migration 002)
+    await supabase.from("resumes").update({ is_active: false }).eq("is_active", true);
+
+    const insertPayload: Record<string, unknown> = {
+      filename: file.name,
+      storage_path: storagePath,
+      extracted_text: extractedText,
+      skills,
+      is_active: true,
+    };
+
+    let { data, error } = await supabase
       .from("resumes")
-      .insert({
-        filename: file.name,
-        storage_path: storagePath,
-        extracted_text: extractedText,
-        skills,
-      })
+      .insert(insertPayload)
       .select()
       .single();
+
+    // Fallback if migration 002 not applied yet
+    if (error && /is_active/i.test(error.message)) {
+      delete insertPayload.is_active;
+      ({ data, error } = await supabase
+        .from("resumes")
+        .insert(insertPayload)
+        .select()
+        .single());
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ resume: data });
+    const resume = data as Resume;
+
+    await ensureSampleJobs(supabase);
+    const matches = await matchResumeToJobs(supabase, resume);
+    const applications = await processApplicationsForResume(
+      supabase,
+      resume,
+      matches,
+    );
+
+    return NextResponse.json({
+      resume,
+      matches,
+      applications,
+      extracted: Boolean(extractedText),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Upload failed";
     return NextResponse.json({ error: message }, { status: 500 });

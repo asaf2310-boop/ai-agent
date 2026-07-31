@@ -1,8 +1,10 @@
-name: Daily job refresh
+name: Job scan twice daily
 
 on:
   schedule:
+    # ~08:00 and ~20:00 Asia/Jerusalem (approx; UTC)
     - cron: "0 5 * * *"
+    - cron: "0 17 * * *"
   workflow_dispatch:
 
 jobs:
@@ -26,12 +28,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run daily refresh
+      - name: Scan, match, tailor, apply
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_SCHEMA: job_agent
-          MIN_MATCH_SCORE: "0.35"
+          MIN_MATCH_SCORE: "0.3"
           MAX_JOB_AGE_DAYS: "7"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          APPLICATION_NOTIFY_EMAIL: ${{ secrets.APPLICATION_NOTIFY_EMAIL }}
+          APPLICATION_FROM_EMAIL: ${{ secrets.APPLICATION_FROM_EMAIL }}
         run: python refresh.py

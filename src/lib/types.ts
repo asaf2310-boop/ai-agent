@@ -5,6 +5,7 @@ export type Resume = {
   extracted_text: string | null;
   skills: string[];
   created_at: string;
+  is_active?: boolean;
 };
 
 export type Job = {
@@ -18,6 +19,7 @@ export type Job = {
   description: string | null;
   posted_at: string | null;
   scraped_at: string;
+  apply_email?: string | null;
 };
 
 export type JobMatch = {
@@ -27,5 +29,21 @@ export type JobMatch = {
   score: number;
   reasons: string[];
   created_at: string;
+  jobs?: Job;
+};
+
+export type Application = {
+  id: string;
+  resume_id: string;
+  job_id: string;
+  match_id: string | null;
+  status: "sent" | "prepared" | "skipped" | "failed";
+  method: string | null;
+  skip_reason: string | null;
+  recruiter_insights: string | null;
+  tailored_cv_text: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
   jobs?: Job;
 };
