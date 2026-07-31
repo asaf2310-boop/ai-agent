@@ -21,6 +21,7 @@ import {
   isBrokenLinkedInUrl,
   safeJobOpenUrl,
 } from "@/lib/linkedin-url";
+import { isFakeIlBoardUrl, isCatalogIlBoardSource } from "@/lib/il-boards";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
@@ -88,16 +89,37 @@ export async function ensureSampleJobs(supabase: DbClient) {
   await repairBrokenLinkedInUrls(supabase);
 }
 
-/** Fix LinkedIn / Telegram / Facebook demo links left from older catalog seeds. */
+/** Fix broken LinkedIn / Telegram / Facebook / fake IL board links. */
 async function repairBrokenLinkedInUrls(supabase: DbClient) {
   try {
     const { data } = await supabase
       .from("jobs")
       .select("id, url, title, source, channel, external_id")
       .or(
-        "source.ilike.%linkedin%,channel.ilike.%linkedin%,url.ilike.%linkedin.com%,source.ilike.%telegram%,channel.ilike.%telegram%,url.ilike.%t.me%,source.ilike.%facebook%,channel.ilike.%facebook%,url.ilike.%facebook.com%",
+        [
+          "source.ilike.%linkedin%",
+          "channel.ilike.%linkedin%",
+          "url.ilike.%linkedin.com%",
+          "source.ilike.%telegram%",
+          "channel.ilike.%telegram%",
+          "url.ilike.%t.me%",
+          "source.ilike.%facebook%",
+          "channel.ilike.%facebook%",
+          "url.ilike.%facebook.com%",
+          "source.eq.alljobs",
+          "source.eq.drushim",
+          "source.eq.jobmaster",
+          "source.eq.jobnet",
+          "source.eq.gotfriends",
+          "url.ilike.%alljobs.co.il%",
+          "url.ilike.%drushim.co.il%",
+          "url.ilike.%jobmaster.co.il%",
+          "url.ilike.%jobnet.co.il%",
+          "url.ilike.%gotfriends.co.il%",
+          "url.ilike.%ref=ai-agent%",
+        ].join(","),
       )
-      .limit(500);
+      .limit(800);
     const rows = (data || []) as Array<{
       id: string;
       url?: string | null;
@@ -107,9 +129,29 @@ async function repairBrokenLinkedInUrls(supabase: DbClient) {
       external_id?: string | null;
     }>;
     for (const job of rows) {
+      // Null out fake IL board URLs (alljobs/drushim/jobnet 403/white/404)
+      if (
+        job.url &&
+        (isFakeIlBoardUrl(job.url) ||
+          isCatalogIlBoardSource(job.source) ||
+          /[?&]ref=ai-agent\b/i.test(job.url))
+      ) {
+        try {
+          await supabase.from("jobs").update({ url: null }).eq("id", job.id);
+        } catch {
+          // best-effort
+        }
+        continue;
+      }
+
       const next = safeJobOpenUrl(job);
-      // Clear fake social URLs entirely; repair LinkedIn to search/view
-      if (job.url && next === null && /t\.me|telegram|facebook\.com\/(?:groups\/)?example/i.test(job.url)) {
+      if (
+        job.url &&
+        next === null &&
+        /t\.me|telegram|facebook\.com\/(?:groups\/)?example|linkedin\.com\/jobs\/search/i.test(
+          job.url,
+        )
+      ) {
         try {
           await supabase.from("jobs").update({ url: null }).eq("id", job.id);
         } catch {
@@ -118,7 +160,6 @@ async function repairBrokenLinkedInUrls(supabase: DbClient) {
         continue;
       }
       if (!job.url || !isBrokenLinkedInUrl(job.url)) {
-        // Also clear other broken social if safeJobOpenUrl nulled them
         if (job.url && next === null && /t\.me|example/i.test(job.url)) {
           try {
             await supabase.from("jobs").update({ url: null }).eq("id", job.id);

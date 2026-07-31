@@ -1,9 +1,8 @@
 /**
  * Large Israel-only job catalog across AI, finance, product, management, and tech.
  * Sources labeled like IL boards / LinkedIn until live scrapers or partner APIs exist.
+ * Board URLs are intentionally null — fake deep-links 403 / white-screen / 404.
  */
-
-import { linkedInJobsSearchUrl } from "@/lib/linkedin-url";
 
 export type CatalogJob = {
   source: string;
@@ -20,10 +19,7 @@ export type CatalogJob = {
   domain: string;
 };
 
-const boardUrl = (board: string, id: string) =>
-  `https://www.${board}.co.il/search?ref=ai-agent&id=${id}`;
-
-/** Rotate IL board labels so the catalog feels multi-site. */
+/** Rotate IL board labels so the catalog feels multi-site (labels only — no fake URLs). */
 const boards = ["alljobs", "drushim", "jobmaster", "jobnet", "gotfriends"] as const;
 
 function boardFor(i: number): string {
@@ -62,12 +58,8 @@ const base = (
     title,
     company,
     location,
-    url:
-      opts?.url !== undefined
-        ? opts.url
-        : isSocial
-          ? linkedInJobsSearchUrl(title)
-          : boardUrl(source.includes("social") ? "linkedin" : source, id),
+    // Never invent alljobs/drushim/jobnet URLs — they 403 / white-screen / 404.
+    url: opts?.url !== undefined ? opts.url : null,
     description: applyEmail
       ? `${description} הגשה במייל: ${applyEmail}`
       : description,
@@ -335,8 +327,8 @@ export const ISRAEL_JOB_CATALOG: CatalogJob[] = [
       post_kind: s.post_kind,
       channel: s.channel,
       is_social: true,
-      // Never invent fake t.me / Facebook handles — they show "user does not exist".
-      url: s.channel === "linkedin" ? linkedInJobsSearchUrl(s.title) : null,
+      // Never invent alljobs/drushim/jobnet URLs or LinkedIn search — they break in-app.
+      url: null,
     }),
   ),
 ];
