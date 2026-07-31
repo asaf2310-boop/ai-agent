@@ -99,6 +99,9 @@ export async function POST(request: Request) {
         application: current,
         alreadySent: true,
         ok: true,
+        status: "sent",
+        detail: "כבר נשלח — מופיע בהיסטוריה",
+        clearedFromPool: true,
       });
     }
 
