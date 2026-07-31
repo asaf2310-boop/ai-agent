@@ -1,9 +1,17 @@
-import { extractEmails, resolveApplyEmail } from "@/lib/apply-email";
+import {
+  explainResendFailure,
+  extractEmails,
+  fetchApplyEmailFromUrl,
+  resolveApplyEmail,
+  wasSentToEmployer,
+} from "@/lib/apply-email";
 import { isIsraelLocation } from "@/lib/israel";
 import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
+
+export { wasSentToEmployer };
 
 // Admin client may use custom schema (job_agent); keep typing loose.
 type DbClient = {
@@ -292,6 +300,7 @@ export async function processApplicationsForResume(
     (a, b) => Number(b.score) - Number(a.score),
   );
   const results = [];
+  let urlFetchBudget = 5;
 
   for (const match of sorted.slice(0, maxApps)) {
     const job = match.jobs;
@@ -307,7 +316,21 @@ export async function processApplicationsForResume(
     const insights = asPlainText(tailored.insights);
     const tailoredCv = asPlainText(tailored.tailoredCv);
     const isSocial = Boolean(job.is_social) || job.source.startsWith("social");
-    const applyEmail = resolveApplyEmail(job);
+    let applyEmail = resolveApplyEmail(job);
+    if (!applyEmail && !isSocial && urlFetchBudget > 0) {
+      urlFetchBudget -= 1;
+      applyEmail = await fetchApplyEmailFromUrl(job.url);
+      if (applyEmail) {
+        try {
+          await supabase
+            .from("jobs")
+            .update({ apply_email: applyEmail })
+            .eq("id", job.id);
+        } catch {
+          // best-effort persist
+        }
+      }
+    }
 
     let status: "sent" | "prepared" | "skipped" | "failed" = "prepared";
     let method: string | null = "in-app";
@@ -322,8 +345,8 @@ export async function processApplicationsForResume(
       status = "skipped";
       method = isSocial ? "link-only" : "no-email";
       skipReason = isSocial
-        ? "לא נשלח — פוסט ברשת (LinkedIn וכו׳). הגשה ידנית דרך הקישור"
-        : "לא נשלח — אין מייל הגשה למשרה. קו״ח מותאם מוכן; הגש ידנית בקישור";
+        ? "לא נשלח — פוסט ברשת (LinkedIn/Telegram וכו׳) בלי מייל הגשה. הגשה ידנית בקישור"
+        : "לא נשלח — אין מייל הגשה במשרה. קו״ח מותאם מוכן להגשה ידנית";
     } else {
       const emailBody = [
         `שלום,`,
@@ -357,13 +380,12 @@ export async function processApplicationsForResume(
       } else if (sent.error?.includes("RESEND_API_KEY")) {
         status = "skipped";
         method = "no-resend";
-        skipReason =
-          "לא נשלח — חסר RESEND_API_KEY. הקו״ח הותאם ונשמר להגשה ידנית";
+        skipReason = explainResendFailure(sent.error);
       } else {
         status = "failed";
         method = "job-email";
         error = sent.error || "שליחה למעסיק נכשלה";
-        skipReason = "לא נשלח — שגיאה בשליחת המייל למעסיק";
+        skipReason = explainResendFailure(sent.error);
       }
     }
 

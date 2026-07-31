@@ -80,14 +80,19 @@ export async function POST(request: Request) {
 
     const appRows = applications as Application[];
     const sentCount = appRows.filter((a) => wasSentToEmployer(a)).length;
+    const sentJobIds = new Set(
+      appRows.filter((a) => wasSentToEmployer(a)).map((a) => a.job_id),
+    );
+    // Active pool excludes already-sent jobs (they live in send history only)
+    const poolMatches = matches.filter((m) => !sentJobIds.has(m.job_id));
 
     return NextResponse.json({
       resume,
-      matchesCount: matches.length,
+      matchesCount: poolMatches.length,
       applicationsCount: applications.length,
       sentCount,
       notSentCount: applications.length - sentCount,
-      matches,
+      matches: poolMatches,
       applications,
     });
   } catch (err) {

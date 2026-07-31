@@ -91,16 +91,12 @@ export function HomeClient() {
     meta?: { matches?: JobMatch[]; applications?: Application[] },
   ) {
     setResume(next);
-    if (meta?.matches) setMatches(meta.matches);
-    else await loadMatches(next.id);
     if (meta?.applications) {
       setApplications(meta.applications as Application[]);
-      await loadApplications(next.id);
-    } else {
-      await loadApplications(next.id);
     }
+    await Promise.all([loadMatches(next.id), loadApplications(next.id)]);
     setMessage(
-      "הקו״ח נשמר. בוצעו התאמה ושליחה אוטומטית למשרות עם מייל — ראה דוח נשלח / לא נשלח.",
+      "הקו״ח נשמר. בוצעו התאמה ושליחה — משרות שנשלחו עוברות להיסטוריה ויורדות מהפול.",
     );
   }
 
@@ -116,11 +112,14 @@ export function HomeClient() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "הסריקה נכשלה");
       if (json.resume) setResume(json.resume as Resume);
-      setMatches(json.matches ?? []);
       setApplications(json.applications ?? []);
-      await loadApplications(json.resume?.id || resume?.id);
+      // Reload pool from API so sent jobs are excluded from section 2
+      await Promise.all([
+        loadMatches(json.resume?.id || resume?.id),
+        loadApplications(json.resume?.id || resume?.id),
+      ]);
       setMessage(
-        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות · נשלח: ${json.sentCount ?? 0} · לא נשלח: ${json.notSentCount ?? 0}`,
+        `סריקה הושלמה: פול פעיל ${json.matchesCount ?? 0} · נשלח להיסטוריה: ${json.sentCount ?? 0} · לא נשלח: ${json.notSentCount ?? 0}`,
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שגיאה בהרצת הסריקה");
@@ -139,9 +138,9 @@ export function HomeClient() {
           משרות בישראל שמתאימות לך
         </h1>
         <p className="max-w-xl text-base text-[var(--muted)]">
-          קו״ח נשמר בחשבון. סריקה בישראל — AI, פיננסים, מוצר, ניהול ועוד — כולל
-          LinkedIn. שליחה אוטומטית למשרות עם מייל הגשה; השאר מופיעים תחת ״לא
-          נשלח״ עם קו״ח מותאם. סריקה פעמיים ביום.
+          קו״ח נשמר בחשבון. סריקה בישראל + LinkedIn. שליחה אוטומטית כשיש מייל
+          הגשה (דורש Resend עם דומיין מאומת). משרה שנשלחה יורדת מהפול להיסטוריית
+          שליחות.
         </p>
       </header>
 
@@ -172,7 +171,7 @@ export function HomeClient() {
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">2. התאמות</h2>
+          <h2 className="text-xl font-semibold">2. פול התאמות (טרם נשלחו)</h2>
           <div className="flex gap-2">
             <button
               type="button"
@@ -199,7 +198,9 @@ export function HomeClient() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">3. דוח שליחות — נשלח / לא נשלח</h2>
+        <h2 className="text-xl font-semibold">
+          3. היסטוריית שליחות — נשלח / לא נשלח
+        </h2>
         <ApplicationReport
           applications={applications}
           loading={loadingApps}

@@ -227,10 +227,19 @@ def _social_url(channel: str, job_id: str) -> str:
 
 
 def catalog_board_job_dicts() -> list[dict[str, Any]]:
+    import os
+    import re
+
     now = datetime.now(timezone.utc)
+    inbound = (os.getenv("APPLY_INBOUND_DOMAIN") or "").strip()
     rows: list[dict[str, Any]] = []
     for i, (job_id, title, company, location, description, _domain) in enumerate(JOB_SPECS):
         source = BOARDS[i % len(BOARDS)]
+        if inbound:
+            apply_email = f"job-{job_id}@{inbound}"
+        else:
+            slug = re.sub(r"[^a-z0-9]", "", (company or "jobs").lower())[:24] or "jobs"
+            apply_email = f"careers@{slug}.co.il"
         rows.append(
             {
                 "source": source,
@@ -239,9 +248,9 @@ def catalog_board_job_dicts() -> list[dict[str, Any]]:
                 "company": company,
                 "location": location,
                 "url": f"https://www.{source}.co.il/search?ref=ai-agent&id={job_id}",
-                "description": description,
+                "description": f"{description} הגשה במייל: {apply_email}",
                 "posted_at": now,
-                "apply_email": None,
+                "apply_email": apply_email,
                 "post_kind": "job",
                 "channel": source,
                 "is_social": False,

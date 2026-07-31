@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { wasSentToEmployer } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+/** Active pool: matches that were NOT yet sent to an employer. */
 export async function GET(request: Request) {
   try {
     const { user, response } = await requireUser();
@@ -27,34 +29,29 @@ export async function GET(request: Request) {
       query = query.eq("resume_id", resumeId);
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    if (error && /user_id/i.test(error.message) && resumeId) {
+      const fallback = await supabase
+        .from("job_matches")
+        .select("*, jobs(*)")
+        .eq("resume_id", resumeId)
+        .gte("score", minScore)
+        .order("score", { ascending: false })
+        .limit(80);
+      data = fallback.data;
+      error = fallback.error;
+    } else if (error && /user_id/i.test(error.message)) {
+      return NextResponse.json({
+        matches: [],
+        warning: "Run SQL migration 004_security_rls_auth.sql",
+      });
+    }
 
     if (error) {
-      // Fallback: older rows may lack user_id — load by resume ownership
-      if (/user_id/i.test(error.message) && resumeId) {
-        const { data: byResume, error: resumeErr } = await supabase
-          .from("job_matches")
-          .select("*, jobs(*)")
-          .eq("resume_id", resumeId)
-          .gte("score", minScore)
-          .order("score", { ascending: false })
-          .limit(80);
-        if (resumeErr) {
-          return NextResponse.json({ error: resumeErr.message }, { status: 500 });
-        }
-        return NextResponse.json({ matches: byResume ?? [] });
-      }
-      if (/user_id/i.test(error.message)) {
-        return NextResponse.json({
-          matches: [],
-          warning: "Run SQL migration 004_security_rls_auth.sql",
-        });
-      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // If user_id filter returned empty but we have a resume, also try resume_id
-    // (covers matches written before user_id was set)
     if ((data?.length ?? 0) === 0 && resumeId) {
       const { data: byResume } = await supabase
         .from("job_matches")
@@ -63,12 +60,39 @@ export async function GET(request: Request) {
         .gte("score", minScore)
         .order("score", { ascending: false })
         .limit(80);
-      if (byResume?.length) {
-        return NextResponse.json({ matches: byResume });
-      }
+      data = byResume;
     }
 
-    return NextResponse.json({ matches: data ?? [] });
+    const matches = data ?? [];
+
+    // Remove jobs already sent to employer from the active pool
+    let sentJobIds = new Set<string>();
+    try {
+      let appsQuery = supabase
+        .from("applications")
+        .select("job_id, status, method")
+        .eq("user_id", user.id)
+        .eq("status", "sent")
+        .eq("method", "job-email");
+      if (resumeId) appsQuery = appsQuery.eq("resume_id", resumeId);
+      const { data: sentApps } = await appsQuery.limit(200);
+      sentJobIds = new Set(
+        (sentApps || [])
+          .filter((a) => wasSentToEmployer(a))
+          .map((a) => a.job_id)
+          .filter(Boolean),
+      );
+    } catch {
+      // if applications query fails, return unfiltered matches
+    }
+
+    const pool = matches.filter((m) => !sentJobIds.has(m.job_id));
+
+    return NextResponse.json({
+      matches: pool,
+      poolCount: pool.length,
+      hiddenSentCount: matches.length - pool.length,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load matches";
     return NextResponse.json({ error: message }, { status: 500 });

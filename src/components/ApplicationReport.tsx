@@ -124,12 +124,16 @@ export function ApplicationReport({ applications, loading, summary }: Props) {
         <>
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              נשלח למעסיק ({sentApps.length})
+              היסטוריית שליחות — נשלח למעסיק ({sentApps.length})
             </h3>
+            <p className="text-sm text-[var(--muted)]">
+              משרות שנשלחו יורדות מהפול (סעיף 2) ומופיעות כאן בלבד.
+            </p>
             {sentApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                עדיין אין שליחות למעסיק. נשלח רק כשיש מייל הגשה במשרה ו-Resend
-                מוגדר כראוי.
+                עדיין אין שליחות. צריך מייל הגשה במשרה + Resend עם דומיין מאומת
+                (לא רק onboarding@resend.dev). פוסטים מלינקדאין/טלגרם נשארים ב״לא
+                נשלח״ להגשה ידנית.
               </p>
             ) : (
               <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
@@ -142,11 +146,11 @@ export function ApplicationReport({ applications, loading, summary }: Props) {
 
           <section className="space-y-2">
             <h3 className="text-lg font-semibold">
-              לא נשלח ({notSentApps.length})
+              לא נשלח — ממתינות ({notSentApps.length})
             </h3>
             <p className="text-sm text-[var(--muted)]">
-              משרות בלי מייל הגשה, פוסטים בלינקדאין/רשתות, או כשל בשליחה — הקו״ח
-              המותאם מוכן להגשה ידנית.
+              בלי מייל מעסיק, פוסט ברשת, או כשל Resend — הקו״ח המותאם מוכן להגשה
+              ידנית. אלה עדיין יכולות להופיע בפול עד שיישלחו.
             </p>
             {notSentApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">הכל נשלח.</p>

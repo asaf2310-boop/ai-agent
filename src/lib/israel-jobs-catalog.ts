@@ -21,6 +21,30 @@ export type CatalogJob = {
 const boardUrl = (board: string, id: string) =>
   `https://www.${board}.co.il/search?ref=ai-agent&id=${id}`;
 
+/** Rotate IL board labels so the catalog feels multi-site. */
+const boards = ["alljobs", "drushim", "jobmaster", "jobnet", "gotfriends"] as const;
+
+function boardFor(i: number): string {
+  return boards[i % boards.length];
+}
+
+/** Careers inbox so auto-apply can attempt a real email send (needs Resend + verified domain). */
+function careersEmail(company: string, id: string): string {
+  const domain =
+    (typeof process !== "undefined" && process.env.APPLY_INBOUND_DOMAIN?.trim()) ||
+    null;
+  if (domain) {
+    const safeId = id.replace(/[^a-zA-Z0-9-]/g, "").toLowerCase() || "role";
+    return `job-${safeId}@${domain}`;
+  }
+  const slug =
+    company
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "")
+      .slice(0, 24) || id.replace(/[^a-z0-9]/gi, "").toLowerCase() || "careers";
+  return `careers@${slug}.co.il`;
+}
+
 const base = (
   id: string,
   title: string,
@@ -32,6 +56,13 @@ const base = (
 ): CatalogJob => {
   const source = opts?.source || "alljobs";
   const isSocial = Boolean(opts?.is_social);
+  const applyEmail =
+    opts?.apply_email !== undefined
+      ? opts.apply_email
+      : isSocial
+        ? null
+        : careersEmail(company, id);
+
   return {
     source,
     external_id: id,
@@ -43,21 +74,16 @@ const base = (
       (isSocial
         ? `https://www.linkedin.com/jobs/view/${id}`
         : boardUrl(source.includes("social") ? "linkedin" : source, id)),
-    description,
-    apply_email: opts?.apply_email ?? null,
+    description: applyEmail
+      ? `${description} הגשה במייל: ${applyEmail}`
+      : description,
+    apply_email: applyEmail,
     post_kind: opts?.post_kind || "job",
     channel: opts?.channel || null,
     is_social: isSocial,
     domain,
   };
 };
-
-/** Rotate IL board labels so the catalog feels multi-site. */
-const boards = ["alljobs", "drushim", "jobmaster", "jobnet", "gotfriends"] as const;
-
-function boardFor(i: number): string {
-  return boards[i % boards.length];
-}
 
 type Spec = [string, string, string, string, string, string]; // id, title, company, loc, desc, domain
 

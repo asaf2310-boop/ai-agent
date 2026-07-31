@@ -34,6 +34,11 @@ export function resolveApplyEmail(job: {
   const fromField = job.apply_email?.trim().toLowerCase();
   if (fromField && extractEmails(fromField).length) return fromField;
 
+  if (job.url?.toLowerCase().startsWith("mailto:")) {
+    const fromMailto = extractEmails(job.url.replace(/^mailto:/i, ""));
+    if (fromMailto[0]) return fromMailto[0];
+  }
+
   const fromDesc = extractEmails(job.description);
   if (fromDesc[0]) return fromDesc[0];
 
@@ -46,4 +51,43 @@ export function wasSentToEmployer(app: {
   method?: string | null;
 }): boolean {
   return app.status === "sent" && app.method === "job-email";
+}
+
+export function explainResendFailure(error: string | null | undefined): string {
+  const e = error || "";
+  if (/RESEND_API_KEY/i.test(e)) {
+    return "לא נשלח — חסר RESEND_API_KEY ב-Vercel";
+  }
+  if (/only send|testing emails|own email|verify a domain|domain is not verified/i.test(e)) {
+    return "לא נשלח — Resend במצב בדיקה. אמת דומיין (למשל allincenter.co.il) ב-Resend כדי לשלוח למיילים של מעסיקים";
+  }
+  if (e) return `לא נשלח — שגיאת Resend: ${e.slice(0, 180)}`;
+  return "לא נשלח — שגיאה בשליחת המייל למעסיק";
+}
+
+/** Try to pull a mailto / email off a public job page (best-effort). */
+export async function fetchApplyEmailFromUrl(
+  url: string | null | undefined,
+): Promise<string | null> {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  if (/linkedin\.com|facebook\.com|t\.me|telegram|whatsapp|twitter|x\.com/i.test(url)) {
+    return null;
+  }
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "ai-agent-job-scanner/1.0" },
+      signal: AbortSignal.timeout(5000),
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 200_000);
+    const mailto = html.match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+    if (mailto?.[1]) {
+      const email = mailto[1].toLowerCase();
+      if (extractEmails(email).length) return email;
+    }
+    return extractEmails(html)[0] || null;
+  } catch {
+    return null;
+  }
 }
