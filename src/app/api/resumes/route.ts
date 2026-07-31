@@ -110,13 +110,13 @@ export async function POST(request: Request) {
     );
     const signals = extractedText
       ? extractResumeSignals(extractedText)
-      : { skills: [] as string[] };
-    // Prefer concrete skills + domains; keep titles as searchable signals
+      : null;
+    // Concrete skills + domains + inferred role titles for matching
     const skills = [
       ...new Set([
-        ...signals.skills,
+        ...(signals?.skills || []),
         ...(extractedText ? extractSkills(extractedText) : []),
-        ...("titles" in signals ? signals.titles || [] : []),
+        ...(signals?.titles || []),
       ]),
     ].slice(0, 40);
 
