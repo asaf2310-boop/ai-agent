@@ -1,4 +1,3 @@
-import { AuthHeader } from "@/components/AuthHeader";
 import { HomeClient } from "@/components/HomeClient";
 import { createClient } from "@/lib/supabase/server";
 
@@ -8,10 +7,5 @@ export default async function Home() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return (
-    <>
-      <AuthHeader email={user?.email} />
-      <HomeClient />
-    </>
-  );
+  return <HomeClient email={user?.email} />;
 }
