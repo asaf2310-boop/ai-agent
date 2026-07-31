@@ -23,6 +23,7 @@ import {
 } from "@/lib/linkedin-url";
 import { fetchDrushimIsraelJobs } from "@/lib/drushim-jobs";
 import { isFakeIlBoardUrl } from "@/lib/il-boards";
+import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import {
   applyRejectionPreference,
   loadRejectionProfile,
@@ -476,9 +477,18 @@ export async function processApplicationsForResume(
     normalizeApplyEmail(process.env.CANDIDATE_EMAIL) ||
     normalizeApplyEmail(process.env.APPLICATION_CANDIDATE_EMAIL) ||
     null;
+  const daily = ownerId
+    ? await getDailyAutoApplyUsage(supabase, ownerId)
+    : { used: 0, quota: 20, remaining: 20, dayKey: "" };
+  if (daily.remaining <= 0) {
+    return [];
+  }
+
+  // Cap attempts; stop early once today's successful auto-sends hit the quota.
   const maxApps = Math.min(
     Number(process.env.MAX_APPLICATIONS_PER_RUN || "40"),
     60,
+    Math.max(daily.remaining * 3, daily.remaining),
   );
   // Prefer jobs we can actually auto-send (email or apply page)
   const sorted = [...matches]
@@ -501,9 +511,12 @@ export async function processApplicationsForResume(
   let webApplyBudget = Math.min(
     Number(process.env.MAX_WEB_APPLY_PER_RUN || "20"),
     25,
+    daily.remaining,
   );
+  let sentThisRun = 0;
 
   for (const match of sorted.slice(0, maxApps)) {
+    if (sentThisRun >= daily.remaining) break;
     const job = match.jobs;
     if (!job) continue;
 
@@ -717,6 +730,7 @@ export async function processApplicationsForResume(
     if (upsertError) {
       results.push({ status: "failed", error: upsertError.message, job });
     } else {
+      sentThisRun += 1;
       results.push(data);
     }
   }

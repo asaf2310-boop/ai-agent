@@ -71,4 +71,12 @@ Optional: `GROQ_API_KEY`, `RESEND_API_KEY`, `APPLICATION_NOTIFY_EMAIL`, `SOCIAL_
 1. Sign in with Gmail.
 2. Upload CV → owned by your user id.
 3. Match / tailor / apply scoped to your data.
-4. Actions scan twice daily using service role.
+4. Twice daily (`05:00` / `17:00` UTC ≈ morning & evening Israel): GitHub Actions + Vercel Cron call `/api/cron/auto-apply`, which syncs jobs and auto-sends (email or web-form) up to **20 successful applications per user per Israel day**. Only real sends appear in History.
+
+### Cron secrets
+
+| Secret / env | Where |
+|--------------|--------|
+| `CRON_SECRET` | Vercel + GitHub Actions |
+| `APP_URL` | GitHub Actions (e.g. `https://ai.allincenter.co.il`) |
+| `DAILY_AUTO_APPLY_QUOTA` | Optional, default `20` |

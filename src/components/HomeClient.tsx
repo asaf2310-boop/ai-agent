@@ -22,6 +22,16 @@ type Summary = {
   prepared: number;
   skipped: number;
   failed: number;
+  dailyAutoUsed?: number;
+  dailyAutoQuota?: number;
+  dailyAutoRemaining?: number;
+};
+
+type DailyQuota = {
+  used: number;
+  quota: number;
+  remaining: number;
+  dayKey?: string;
 };
 
 export function HomeClient({ email }: { email?: string | null }) {
@@ -30,6 +40,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [matches, setMatches] = useState<JobMatch[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [summary, setSummary] = useState<Summary | undefined>();
+  const [dailyQuota, setDailyQuota] = useState<DailyQuota | null>(null);
   const [loadingResume, setLoadingResume] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
@@ -96,6 +107,15 @@ export function HomeClient({ email }: { email?: string | null }) {
         if (res.ok) {
           setApplications(json.applications ?? []);
           setSummary(json.summary);
+          if (json.dailyQuota) {
+            setDailyQuota(json.dailyQuota as DailyQuota);
+          } else if (json.summary) {
+            setDailyQuota({
+              used: json.summary.dailyAutoUsed ?? 0,
+              quota: json.summary.dailyAutoQuota ?? 20,
+              remaining: json.summary.dailyAutoRemaining ?? 20,
+            });
+          }
         }
       } finally {
         if (!opts?.quiet) setLoadingApps(false);
@@ -372,11 +392,20 @@ export function HomeClient({ email }: { email?: string | null }) {
         loadMatches(json.resume?.id || resume?.id),
         loadApplications(json.resume?.id || resume?.id),
       ]);
+      if (json.dailyQuota) {
+        setDailyQuota(json.dailyQuota as DailyQuota);
+      }
+      const q = json.dailyQuota as DailyQuota | undefined;
+      const quotaHint = q
+        ? ` · היום ${q.used}/${q.quota} אוטומטיות`
+        : "";
       setMessage(
-        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש אוטומטית: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}` +
-          ((json.sentCount ?? 0) === 0
-            ? " — אין מייל/טופס ATS במשרות הנוכחיות; בפול רק משרות עם קישור פעיל להגשה ידנית"
-            : ""),
+        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש אוטומטית: ${json.sentCount ?? 0}${quotaHint} · נפתח: ${json.openedCount ?? 0}` +
+          (q && q.remaining <= 0
+            ? ` — מכסת היום מלאה (${q.quota}). סריקה אוטומטית תמשיך מחר.`
+            : (json.sentCount ?? 0) === 0
+              ? " — אין מייל/טופס ATS במשרות הנוכחיות; בפול רק משרות עם קישור פעיל להגשה ידנית"
+              : ""),
       );
       setTab("pool");
     } catch (err) {
@@ -388,6 +417,8 @@ export function HomeClient({ email }: { email?: string | null }) {
 
   const sentCount = summary?.sent ?? 0;
   const openedCount = summary?.opened ?? 0;
+  const autoTodayUsed = dailyQuota?.used ?? summary?.dailyAutoUsed ?? 0;
+  const autoTodayQuota = dailyQuota?.quota ?? summary?.dailyAutoQuota ?? 20;
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -411,10 +442,20 @@ export function HomeClient({ email }: { email?: string | null }) {
                 סוכן המשרות שלך בישראל
               </h1>
               <p className="max-w-md text-sm leading-relaxed text-[var(--muted)]">
-                סורק LinkedIn ולוחות דרושים, מתאים לקו״ח, שולח במייל או מגיש
-                אוטומטית בטופס האתר — הכל במקום אחד.
+                פעמיים ביום סורק משרות שאפשר לשלוח אליהן אוטומטית (מייל או
+                טופס), משלים עד {autoTodayQuota} שליחות ביום — והכל נשמר
+                בהיסטוריה.
               </p>
             </header>
+
+            {resume && (
+              <p className="animate-rise text-sm text-[var(--muted)]">
+                שליחות אוטומטיות היום:{" "}
+                <span className="font-semibold text-[var(--ink)]">
+                  {autoTodayUsed}/{autoTodayQuota}
+                </span>
+              </p>
+            )}
 
             <div className="animate-rise-delay-1 grid grid-cols-3 gap-3 text-center">
               <button
@@ -486,7 +527,8 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  רק משרות עם קישור פעיל · שליחה אוטומטית בסריקה כשאפשר
+                  רק משרות עם קישור פעיל · אוטומטי היום {autoTodayUsed}/
+                  {autoTodayQuota}
                 </p>
               </div>
               <div className="flex gap-2">

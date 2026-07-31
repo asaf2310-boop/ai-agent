@@ -8,6 +8,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Primary: Next.js cron — email + web-form auto-apply, 20/day quota, history
+  auto-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Twice-daily auto-apply (quota 20)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "Missing APP_URL or CRON_SECRET — skip Next cron (configure repo secrets)."
+            exit 0
+          fi
+          BASE="${APP_URL%/}"
+          echo "Calling ${BASE}/api/cron/auto-apply"
+          curl -fsS -X POST "${BASE}/api/cron/auto-apply" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --max-time 300 \
+            -o /tmp/cron-result.json
+          cat /tmp/cron-result.json
+          echo
+
+  # Fallback scrape into Supabase (LinkedIn/social) — respects same daily email quota
   refresh:
     runs-on: ubuntu-latest
     defaults:
@@ -35,6 +60,7 @@ jobs:
           SUPABASE_SCHEMA: job_agent
           MIN_MATCH_SCORE: "0.2"
           MAX_JOB_AGE_DAYS: "7"
+          DAILY_AUTO_APPLY_QUOTA: "20"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

@@ -4,6 +4,7 @@ import {
   wasSentToEmployer,
 } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tryAutoWebApply, canAutoApplyJob } from "@/lib/web-apply";
@@ -106,6 +107,19 @@ export async function POST(request: Request) {
         detail: "כבר נשלח — מופיע בהיסטוריה",
         clearedFromPool: true,
       });
+    }
+
+    const dailyQuota = await getDailyAutoApplyUsage(supabase, user.id);
+    if (dailyQuota.remaining <= 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          quotaExceeded: true,
+          dailyQuota,
+          error: `הגעת למכסת ${dailyQuota.quota} שליחות אוטומטיות להיום. המשך מחר או הגש ידנית מהפול.`,
+        },
+        { status: 429 },
+      );
     }
 
     const resumeText =
