@@ -31,7 +31,13 @@ export function HomeClient() {
       const qs = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : "";
       const res = await fetch(`/api/matches${qs}`);
       const json = await res.json();
-      if (res.ok) setMatches(json.matches ?? []);
+      if (res.ok) {
+        setMatches(json.matches ?? []);
+      } else {
+        setMessage(json.error || "טעינת התאמות נכשלה");
+      }
+    } catch {
+      setMessage("טעינת התאמות נכשלה");
     } finally {
       setLoadingMatches(false);
     }
@@ -66,6 +72,9 @@ export function HomeClient() {
         ]);
         return;
       }
+      if (!res.ok) {
+        setMessage(json.error || "טעינת קו״ח נכשלה");
+      }
       await Promise.all([loadMatches(), loadApplications()]);
     } finally {
       setLoadingResume(false);
@@ -90,7 +99,7 @@ export function HomeClient() {
       await loadApplications(next.id);
     }
     setMessage(
-      "הקו״ח נשמר בחשבון שלך. בוצעו התאמה, שכתוב, וניסיון שליחה — ראה דוח למטה.",
+      "הקו״ח נשמר. בוצעו התאמה ושכתוב — התוצאות מופיעות למטה במערכת (בלי מייל).",
     );
   }
 
@@ -104,13 +113,13 @@ export function HomeClient() {
         body: JSON.stringify({ resumeId: resume?.id }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Pipeline failed");
+      if (!res.ok) throw new Error(json.error || "הסריקה נכשלה");
       if (json.resume) setResume(json.resume as Resume);
       setMatches(json.matches ?? []);
       setApplications(json.applications ?? []);
       await loadApplications(json.resume?.id || resume?.id);
       setMessage(
-        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות בישראל, ${json.applicationsCount ?? 0} רשומות בדוח.`,
+        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות, ${json.applicationsCount ?? 0} רשומות בדוח במערכת.`,
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שגיאה בהרצת הסריקה");
@@ -130,7 +139,8 @@ export function HomeClient() {
         </h1>
         <p className="max-w-xl text-base text-[var(--muted)]">
           קו״ח נשמר בחשבון. סריקה בישראל — AI, פיננסים, מוצר, ניהול ועוד — כולל
-          פוסטים בסגנון LinkedIn. סריקה אוטומטית פעמיים ביום.
+          פוסטים בסגנון LinkedIn. התוצאות והקו״ח המותאם מופיעים במערכת (בלי מייל
+          התראה). סריקה אוטומטית פעמיים ביום.
         </p>
       </header>
 
@@ -169,7 +179,7 @@ export function HomeClient() {
               disabled={pipelineBusy || !resume}
               className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
             >
-              {pipelineBusy ? "רץ…" : "הפעל סריקה + שליחה"}
+              {pipelineBusy ? "רץ…" : "הפעל סריקה"}
             </button>
             <button
               type="button"

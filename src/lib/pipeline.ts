@@ -1,7 +1,7 @@
-import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
 import { isIsraelLocation } from "@/lib/israel";
 import { scoreMatch } from "@/lib/matching";
-import { tailorResumeForJob } from "@/lib/openai";
+import { asPlainText, tailorResumeForJob } from "@/lib/openai";
+import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
 import type { Job, JobMatch, Resume } from "@/lib/types";
 
 // Admin client may use custom schema (job_agent); keep typing loose.
@@ -257,6 +257,11 @@ async function sendApplicationEmail(input: {
   return { ok: true, method: "resend" };
 }
 
+/**
+ * Prepare tailored CVs in the app report.
+ * By default does NOT email anyone — results appear in the UI only.
+ * Optional: ENABLE_EMPLOYER_EMAIL=true + job.apply_email to email recruiters.
+ */
 export async function processApplicationsForResume(
   supabase: DbClient,
   resume: Resume,
@@ -265,11 +270,20 @@ export async function processApplicationsForResume(
 ) {
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || "";
-  const notifyEmail = process.env.APPLICATION_NOTIFY_EMAIL;
   const ownerId = userId || resume.user_id;
+  const enableEmployerEmail =
+    process.env.ENABLE_EMPLOYER_EMAIL === "true" ||
+    process.env.ENABLE_EMPLOYER_EMAIL === "1";
+  const maxApps = Math.min(
+    Number(process.env.MAX_APPLICATIONS_PER_RUN || "40"),
+    60,
+  );
+  const sorted = [...matches].sort(
+    (a, b) => Number(b.score) - Number(a.score),
+  );
   const results = [];
 
-  for (const match of matches) {
+  for (const match of sorted.slice(0, maxApps)) {
     const job = match.jobs;
     if (!job) continue;
 
@@ -280,82 +294,51 @@ export async function processApplicationsForResume(
       jobDescription: job.description,
     });
 
+    const insights = asPlainText(tailored.insights);
+    const tailoredCv = asPlainText(tailored.tailoredCv);
     const applyEmail = job.apply_email || null;
     const isSocial = Boolean(job.is_social) || job.source.startsWith("social");
 
     let status: "sent" | "prepared" | "skipped" | "failed" = "prepared";
-    let method: string | null = "tailor-only";
-    let skipReason: string | null = null;
+    let method: string | null = "in-app";
+    let skipReason: string | null = isSocial
+      ? "נשמר במערכת — פתח את הקישור והגש ידנית"
+      : "נשמר במערכת — קו״ח מותאם זמין בדוח";
     let error: string | null = null;
 
-    const emailBody = isSocial
-      ? [
-          "פוסט דרושים/פרילנס מהרשת",
-          `כותרת: ${job.title}`,
-          `ערוץ: ${job.channel || job.source}`,
-          `סוג: ${job.post_kind || "social"}`,
-          `קישור לפוסט: ${job.url || "—"}`,
-          "",
-          "למה זה רלוונטי:",
-          tailored.insights,
-          "",
-          "טיוטת פנייה / קו״ח מותאם:",
-          tailored.tailoredCv,
-        ].join("\n")
-      : [
-          `מועמדות אוטומטית למשרה: ${job.title}`,
-          `חברה: ${job.company || "—"}`,
-          `קישור: ${job.url || "—"}`,
-          "",
-          "מה המגייס מחפש:",
-          tailored.insights,
-          "",
-          "קו״ח מותאם:",
-          tailored.tailoredCv,
-        ].join("\n");
+    // Optional: only email the employer when explicitly enabled and apply_email exists
+    if (enableEmployerEmail && applyEmail) {
+      const emailBody = [
+        `מועמדות למשרה: ${job.title}`,
+        `חברה: ${job.company || "—"}`,
+        `קישור: ${job.url || "—"}`,
+        "",
+        "סיכום התאמה:",
+        insights,
+        "",
+        "קו״ח מותאם:",
+        tailoredCv,
+      ].join("\n");
 
-    const target = applyEmail || notifyEmail;
-    const subject = isSocial
-      ? `AI Agent · קישור לפוסט · ${job.title}`
-      : `AI Agent · ${job.title}${job.company ? ` @ ${job.company}` : ""}`;
-
-    if (!target) {
-      if (isSocial && job.url) {
-        status = "prepared";
-        method = "link-only";
-        skipReason =
-          "פוסט מהרשת — הקישור מוצג בדוח. הגדר APPLICATION_NOTIFY_EMAIL לקבלת התראה במייל";
-      } else {
-        status = "skipped";
-        skipReason =
-          "אין כתובת הגשה למשרה ואין APPLICATION_NOTIFY_EMAIL — הקו״ח הותאם ונשמר לדוח";
-        method = "none";
-      }
-    } else {
       const sent = await sendApplicationEmail({
-        to: target,
-        subject,
+        to: applyEmail,
+        subject: `AI Agent · מועמדות · ${job.title}${job.company ? ` @ ${job.company}` : ""}`,
         body: emailBody,
       });
 
       if (sent.ok) {
         status = "sent";
-        method =
-          isSocial && !applyEmail
-            ? "link-alert"
-            : applyEmail
-              ? "job-email"
-              : "notify-email";
+        method = "job-email";
+        skipReason = null;
       } else if (sent.error?.includes("RESEND_API_KEY")) {
         status = "prepared";
-        method = isSocial ? "link-only" : "prepared";
-        skipReason = isSocial
-          ? "קישור לפוסט נשמר בדוח. חסר RESEND_API_KEY לשליחת התראה"
-          : "אין RESEND_API_KEY — הקו״ח הותאם ונשמר. הגדר Resend כדי לשלוח בפועל";
+        method = "in-app";
+        skipReason = "נשמר במערכת (שליחה למעסיק כבויה — חסר RESEND_API_KEY)";
       } else {
         status = "failed";
         error = sent.error || "send failed";
         method = sent.method;
+        skipReason = null;
       }
     }
 
@@ -366,8 +349,8 @@ export async function processApplicationsForResume(
       status,
       method,
       skip_reason: skipReason,
-      recruiter_insights: tailored.insights,
-      tailored_cv_text: tailored.tailoredCv,
+      recruiter_insights: insights,
+      tailored_cv_text: tailoredCv,
       error,
       updated_at: new Date().toISOString(),
       ...(ownerId ? { user_id: ownerId } : {}),

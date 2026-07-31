@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const resumeId = searchParams.get("resumeId");
     const minScore = Number(
-      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.3",
+      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.2",
     );
 
     const supabase = createAdminClient();
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
       .eq("user_id", user.id)
       .gte("score", minScore)
       .order("score", { ascending: false })
-      .limit(50);
+      .limit(80);
 
     if (resumeId) {
       query = query.eq("resume_id", resumeId);
@@ -30,7 +30,20 @@ export async function GET(request: Request) {
     const { data, error } = await query;
 
     if (error) {
-      // Fallback if user_id column missing pre-migration
+      // Fallback: older rows may lack user_id — load by resume ownership
+      if (/user_id/i.test(error.message) && resumeId) {
+        const { data: byResume, error: resumeErr } = await supabase
+          .from("job_matches")
+          .select("*, jobs(*)")
+          .eq("resume_id", resumeId)
+          .gte("score", minScore)
+          .order("score", { ascending: false })
+          .limit(80);
+        if (resumeErr) {
+          return NextResponse.json({ error: resumeErr.message }, { status: 500 });
+        }
+        return NextResponse.json({ matches: byResume ?? [] });
+      }
       if (/user_id/i.test(error.message)) {
         return NextResponse.json({
           matches: [],
@@ -38,6 +51,21 @@ export async function GET(request: Request) {
         });
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // If user_id filter returned empty but we have a resume, also try resume_id
+    // (covers matches written before user_id was set)
+    if ((data?.length ?? 0) === 0 && resumeId) {
+      const { data: byResume } = await supabase
+        .from("job_matches")
+        .select("*, jobs(*)")
+        .eq("resume_id", resumeId)
+        .gte("score", minScore)
+        .order("score", { ascending: false })
+        .limit(80);
+      if (byResume?.length) {
+        return NextResponse.json({ matches: byResume });
+      }
     }
 
     return NextResponse.json({ matches: data ?? [] });

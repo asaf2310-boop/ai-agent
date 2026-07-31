@@ -354,9 +354,12 @@ def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str
 
 
 def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
-    notify = os.getenv("APPLICATION_NOTIFY_EMAIL")
+    """Save tailored CVs in-app. No notify emails by default."""
+    enable_employer = os.getenv("ENABLE_EMPLOYER_EMAIL", "").lower() in ("1", "true", "yes")
+    max_apps = min(int(os.getenv("MAX_APPLICATIONS_PER_RUN", "40")), 60)
+    ranked = sorted(matches, key=lambda m: float(m.get("score") or 0), reverse=True)
     written = 0
-    for match in matches:
+    for match in ranked[:max_apps]:
         job = match.get("jobs") or {}
         resume = match.get("_resume") or {}
         resume_text = resume.get("extracted_text") or " ".join(resume.get("skills") or [])
@@ -364,59 +367,36 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
 
         apply_email = job.get("apply_email")
         is_social = bool(job.get("is_social")) or str(job.get("source", "")).startswith("social")
-        target = apply_email or notify
         status = "prepared"
-        method = "prepared"
-        skip_reason = None
+        method = "in-app"
+        skip_reason = (
+            "נשמר במערכת — פתח את הקישור והגש ידנית"
+            if is_social
+            else "נשמר במערכת — קו״ח מותאם זמין בדוח"
+        )
         error = None
 
-        if is_social:
+        if enable_employer and apply_email:
             body = (
-                f"פוסט דרושים/פרילנס מהרשת\n"
-                f"כותרת: {job.get('title')}\n"
-                f"ערוץ: {job.get('channel') or job.get('source')}\n"
-                f"סוג: {job.get('post_kind')}\n"
-                f"קישור לפוסט: {job.get('url')}\n\n"
-                f"למה זה רלוונטי:\n{insights}\n\n"
-                f"טיוטת פנייה / קו״ח מותאם:\n{tailored}"
-            )
-            subject = f"AI Agent · קישור לפוסט · {job.get('title')}"
-        else:
-            body = (
-                f"מועמדות אוטומטית: {job.get('title')}\n"
+                f"מועמדות: {job.get('title')}\n"
                 f"חברה: {job.get('company')}\nקישור: {job.get('url')}\n\n"
-                f"מה המגייס מחפש:\n{insights}\n\nקו״ח מותאם:\n{tailored}"
+                f"סיכום התאמה:\n{insights}\n\nקו״ח מותאם:\n{tailored}"
             )
-            subject = f"AI Agent · {job.get('title')}"
-
-        if not target:
-            status = "prepared" if (is_social and job.get("url")) else "skipped"
-            method = "link-only" if is_social else "none"
-            skip_reason = (
-                "פוסט מהרשת — הקישור נשמר בדוח. הגדר APPLICATION_NOTIFY_EMAIL לקבלת התראה"
-                if is_social
-                else "אין apply_email ואין APPLICATION_NOTIFY_EMAIL"
-            )
-        else:
-            ok, err, method_name = send_resend_email(target, subject, body)
+            subject = f"AI Agent · מועמדות · {job.get('title')}"
+            ok, err, method_name = send_resend_email(apply_email, subject, body)
             if ok:
                 status = "sent"
-                if is_social and not apply_email:
-                    method = "link-alert"
-                else:
-                    method = "job-email" if apply_email else "notify-email"
+                method = "job-email"
+                skip_reason = None
             elif err and "RESEND_API_KEY" in err:
                 status = "prepared"
-                method = "link-only" if is_social else "prepared"
-                skip_reason = (
-                    "קישור לפוסט נשמר בדוח. חסר RESEND_API_KEY לשליחת התראה"
-                    if is_social
-                    else "אין RESEND_API_KEY — הקו״ח הותאם ונשמר בדוח"
-                )
+                method = "in-app"
+                skip_reason = "נשמר במערכת (חסר RESEND_API_KEY לשליחה למעסיק)"
             else:
                 status = "failed"
                 method = method_name
                 error = err
+                skip_reason = None
 
         client.table("applications").upsert(
             {

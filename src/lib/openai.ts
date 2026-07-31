@@ -5,6 +5,25 @@ export type TailorResult = {
   provider: "local" | "groq" | "gemini" | "openai";
 };
 
+/** AI providers sometimes return nested objects instead of plain strings. */
+export function asPlainText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (value == null) return fallback;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    for (const key of ["text", "content", "body", "cv", "tailored_cv", "summary"]) {
+      if (typeof obj[key] === "string") return obj[key] as string;
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 const SKILL_LEXICON = [
   "python",
   "javascript",
@@ -284,8 +303,8 @@ ${input.resumeText.slice(0, 8000)}
     });
     if (parsed?.insights || parsed?.tailored_cv) {
       return {
-        insights: parsed.insights || base.insights,
-        tailoredCv: parsed.tailored_cv || base.tailoredCv,
+        insights: asPlainText(parsed.insights, base.insights),
+        tailoredCv: asPlainText(parsed.tailored_cv, base.tailoredCv),
         usedAi: true,
         provider: "groq",
       };
@@ -301,8 +320,8 @@ ${input.resumeText.slice(0, 8000)}
     });
     if (parsed?.insights || parsed?.tailored_cv) {
       return {
-        insights: parsed.insights || base.insights,
-        tailoredCv: parsed.tailored_cv || base.tailoredCv,
+        insights: asPlainText(parsed.insights, base.insights),
+        tailoredCv: asPlainText(parsed.tailored_cv, base.tailoredCv),
         usedAi: true,
         provider: "gemini",
       };
@@ -319,8 +338,8 @@ ${input.resumeText.slice(0, 8000)}
     });
     if (parsed?.insights || parsed?.tailored_cv) {
       return {
-        insights: parsed.insights || base.insights,
-        tailoredCv: parsed.tailored_cv || base.tailoredCv,
+        insights: asPlainText(parsed.insights, base.insights),
+        tailoredCv: asPlainText(parsed.tailored_cv, base.tailoredCv),
         usedAi: true,
         provider: "openai",
       };
