@@ -13,7 +13,6 @@ function LoginFormInner() {
     const origin = window.location.origin;
     const next = searchParams.get("next") || "/";
 
-    // Keep next in a short-lived cookie — redirectTo must be exact allow-listed URL (no query).
     document.cookie = `auth_next=${encodeURIComponent(next)}; Path=/; Max-Age=600; SameSite=Lax`;
 
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -30,45 +29,84 @@ function LoginFormInner() {
   }
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col justify-center gap-8 px-5 py-16">
-      <header className="space-y-3 text-center">
-        <p className="text-sm font-medium uppercase tracking-[0.18em] text-[var(--accent)]">
-          AI Agent
-        </p>
-        <h1 className="font-[family-name:var(--font-display)] text-3xl tracking-tight sm:text-4xl">
-          התחברות מאובטחת
-        </h1>
-        <p className="text-sm text-[var(--muted)]">
-          הנתונים שלך (קו״ח, התאמות, דוחות) זמינים רק אחרי התחברות עם Gmail —
-          ולא חשופים לציבור.
-        </p>
-      </header>
+    <div className="relative flex min-h-dvh flex-1 flex-col overflow-hidden">
+      <div
+        className="pointer-events-none absolute inset-0"
+        aria-hidden
+        style={{
+          background:
+            "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(46,196,156,0.45), transparent 55%), linear-gradient(180deg, #0c1a22 0%, #123040 48%, #0c1a22 100%)",
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] opacity-40"
+        aria-hidden
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(46,196,156,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(46,196,156,0.12) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+          maskImage: "linear-gradient(to top, black, transparent)",
+        }}
+      />
 
-      {error && (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 break-words">
-          שגיאת התחברות: {error}
-        </p>
-      )}
+      <main className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col justify-between px-6 pb-10 pt-16 sm:pt-24">
+        <header className="animate-rise space-y-6 text-center text-white">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#0c1a22] shadow-[0_0_0_1px_rgba(46,196,156,0.45),0_20px_50px_rgba(0,0,0,0.35)]">
+            <span className="font-[family-name:var(--font-display)] text-3xl font-bold text-[var(--accent-bright)]">
+              A
+            </span>
+          </div>
+          <div className="space-y-3">
+            <h1 className="font-[family-name:var(--font-display)] text-5xl leading-none tracking-tight sm:text-6xl">
+              AllIn
+            </h1>
+            <p className="text-base text-white/75 sm:text-lg">
+              סוכן המשרות שלך — סורק, מתאים, ושולח.
+            </p>
+          </div>
+        </header>
 
-      <button
-        type="button"
-        onClick={() => void signInWithGoogle()}
-        className="inline-flex items-center justify-center gap-3 rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-medium text-white hover:opacity-95"
-      >
-        <span aria-hidden>G</span>
-        התחבר עם Gmail
-      </button>
+        <div className="animate-rise-delay-1 mt-12 space-y-4">
+          {error && (
+            <p className="rounded-xl border border-red-300/40 bg-red-500/15 px-3 py-2 text-sm text-red-100 break-words">
+              שגיאת התחברות: {error}
+            </p>
+          )}
 
-      <p className="text-center text-xs text-[var(--muted)]">
-        אחרי Google תוחזר ל־/auth/callback באתר זה
-      </p>
+          <button
+            type="button"
+            onClick={() => void signInWithGoogle()}
+            className="animate-pulse-ring inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-[var(--accent-bright)] px-4 py-4 text-base font-semibold text-[var(--ink)] transition hover:brightness-105"
+          >
+            <span
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-[#4285F4]"
+              aria-hidden
+            >
+              G
+            </span>
+            התחבר עם Gmail
+          </button>
+
+          <p className="animate-rise-delay-2 text-center text-xs leading-relaxed text-white/55">
+            הקו״ח, ההתאמות וההיסטוריה שלך פרטיים — רק אחרי התחברות.
+            <br />
+            אפשר להתקין את AllIn למסך הבית אחרי הכניסה.
+          </p>
+        </div>
+      </main>
     </div>
   );
 }
 
 export function LoginForm() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-sm">טוען…</div>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-dvh items-center justify-center bg-[var(--ink)] text-sm text-white/70">
+          טוען…
+        </div>
+      }
+    >
       <LoginFormInner />
     </Suspense>
   );
