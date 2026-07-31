@@ -328,46 +328,11 @@ def openai_tailor(resume_text: str, job: dict[str, Any]) -> tuple[str, str, bool
     return tailor_resume(resume_text, job)
 
 
-def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str | None, str]:
-    api_key = os.getenv("RESEND_API_KEY")
-    if not api_key:
-        return False, "RESEND_API_KEY not configured", "none"
-    clean_to = normalize_apply_email(to_email)
-    if not clean_to:
-        return (
-            False,
-            json.dumps(
-                {
-                    "statusCode": 422,
-                    "name": "validation_error",
-                    "message": f"Invalid 'to' field locally: {str(to_email)[:80]}",
-                }
-            ),
-            "resend",
-        )
-    from_email = os.getenv("APPLICATION_FROM_EMAIL", "onboarding@resend.dev")
-    payload = {"from": from_email, "to": [clean_to], "subject": subject, "text": body}
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            resp.read()
-        return True, None, "resend"
-    except urllib.error.HTTPError as exc:
-        return False, exc.read().decode("utf-8", errors="ignore"), "resend"
-    except urllib.error.URLError as exc:
-        return False, str(exc.reason), "resend"
-
-
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-_INVISIBLE_RE = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]")
+_STRICT_EMAIL_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9._%+-]*[a-z0-9])?@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$"
+)
+_INVISIBLE_RE = re.compile(r"[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]")
 _BLOCKED_DOMAINS = {
     "example.com",
     "example.org",
@@ -396,10 +361,64 @@ def normalize_apply_email(raw: str | None) -> str | None:
             continue
         if ".." in email or email.startswith(".") or email.endswith("."):
             continue
+        if domain.startswith(".") or ".." in domain:
+            continue
         if " " in email or "," in email or "<" in email:
             continue
+        if not _STRICT_EMAIL_RE.match(email):
+            continue
+        # Repair known truncated brand domain left in older DB rows
+        if email.endswith("@allincenter.co"):
+            return email[: -len("@allincenter.co")] + "@allincenter.co.il"
         return email
     return None
+
+
+def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str | None, str]:
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        return False, "RESEND_API_KEY not configured", "none"
+    clean_to = normalize_apply_email(to_email)
+    if not clean_to:
+        return (
+            False,
+            json.dumps(
+                {
+                    "statusCode": 422,
+                    "name": "validation_error",
+                    "message": f"Invalid 'to' field. Got: {str(to_email)[:120]!r}",
+                }
+            )
+            + f" | to={str(to_email)[:80]}",
+            "resend",
+        )
+    from_raw = (os.getenv("APPLICATION_FROM_EMAIL") or "onboarding@resend.dev").strip()
+    from_email = normalize_apply_email(from_raw) or "onboarding@resend.dev"
+    # Keep Name <email> if already well-formed
+    angle = re.match(r"^(.+?)\s*<([^>]+)>$", from_raw)
+    if angle:
+        inner = normalize_apply_email(angle.group(2))
+        if inner:
+            from_email = f"{angle.group(1).strip()} <{inner}>"
+    payload = {"from": from_email, "to": [clean_to], "subject": subject, "text": body}
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+        return True, None, "resend"
+    except urllib.error.HTTPError as exc:
+        err = exc.read().decode("utf-8", errors="ignore")
+        return False, f"{err} | to={clean_to} | from={from_email}", "resend"
+    except urllib.error.URLError as exc:
+        return False, str(exc.reason), "resend"
 
 
 def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:

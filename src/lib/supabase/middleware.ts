@@ -37,7 +37,10 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/login") ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico";
+    pathname.startsWith("/icons") ||
+    pathname === "/favicon.ico" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/manifest.json";
 
   if (!user && !isPublic) {
     const redirectUrl = request.nextUrl.clone();

@@ -5,6 +5,7 @@ import {
   isClearedFromPool,
   isValidResendTo,
   normalizeApplyEmail,
+  normalizeFromAddress,
   resolveApplyEmail,
   wasSentToEmployer,
 } from "@/lib/apply-email";
@@ -266,7 +267,6 @@ async function sendApplicationEmail(input: {
   replyTo?: string | null;
 }): Promise<{ ok: boolean; error?: string; method: string }> {
   const resendKey = process.env.RESEND_API_KEY;
-  const from = process.env.APPLICATION_FROM_EMAIL || "onboarding@resend.dev";
 
   if (!resendKey) {
     return { ok: false, error: "RESEND_API_KEY not configured", method: "none" };
@@ -279,11 +279,15 @@ async function sendApplicationEmail(input: {
       error: JSON.stringify({
         statusCode: 422,
         name: "validation_error",
-        message: `Invalid 'to' field locally: ${String(input.to).slice(0, 80)}`,
-      }),
+        message: `Invalid 'to' field. Got: ${JSON.stringify(String(input.to).slice(0, 120))}`,
+      }) + ` | to=${String(input.to).slice(0, 80)}`,
       method: "resend",
     };
   }
+
+  const from =
+    normalizeFromAddress(process.env.APPLICATION_FROM_EMAIL) ||
+    "onboarding@resend.dev";
 
   const replyTo = input.replyTo ? normalizeApplyEmail(input.replyTo) : null;
 
@@ -306,7 +310,11 @@ async function sendApplicationEmail(input: {
 
   if (!res.ok) {
     const text = await res.text();
-    return { ok: false, error: text, method: "resend" };
+    return {
+      ok: false,
+      error: `${text} | to=${to} | from=${from}`,
+      method: "resend",
+    };
   }
 
   return { ok: true, method: "resend" };
