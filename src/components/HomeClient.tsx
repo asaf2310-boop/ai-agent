@@ -313,7 +313,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  משרות פעילות — נשלחו או נפתחו עוברות להיסטוריה
+                  עד 50 משרות · סינון לפי סוג, תאריך ומיקום · החדשה ביותר קודם
                 </p>
               </div>
               <div className="flex gap-2">
