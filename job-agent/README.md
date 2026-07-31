@@ -1,6 +1,6 @@
 # Job Agent
 
-Python worker that upserts Israel job listings and matches them to resumes in Supabase.
+Python worker that upserts Israel job listings (including **LinkedIn jobs from the past 7 days**) and matches them to resumes in Supabase. Runs twice daily via GitHub Actions.
 
 ```bash
 pip install -r requirements.txt
