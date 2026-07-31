@@ -1,5 +1,7 @@
 /** Detect / resolve ATS & company career apply pages from job data. */
 
+import { isFakeIlBoardUrl } from "@/lib/il-boards";
+
 const ATS_HOST_RE =
   /(?:job-)?boards\.greenhouse\.io|boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|jobs\.workable\.com|www\.comeet\.com|comeet\.co|smartrecruiters\.com|myworkdayjobs\.com|greenhouse\.io/i;
 
@@ -18,7 +20,10 @@ const EXTERNAL_APPLY_RES = [
 /** Fake / demo catalog board links — not real application forms. */
 export function isSyntheticJobBoardUrl(url: string | null | undefined): boolean {
   if (!url) return true;
-  return /[?&]ref=ai-agent\b/i.test(url) || /\/search\?ref=ai-agent/i.test(url);
+  if (/[?&]ref=ai-agent\b/i.test(url) || /\/search\?ref=ai-agent/i.test(url)) {
+    return true;
+  }
+  return isFakeIlBoardUrl(url);
 }
 
 export function isLinkedInOrSocialUrl(url: string | null | undefined): boolean {

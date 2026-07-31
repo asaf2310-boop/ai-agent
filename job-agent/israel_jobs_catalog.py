@@ -219,12 +219,8 @@ SOCIAL_SPECS: list[dict[str, str]] = [
 
 
 def _social_url(channel: str, job_id: str, title: str = "") -> str | None:
-    # Never invent fake t.me / Facebook handles — Telegram shows "user does not exist".
-    if channel == "linkedin":
-        from urllib.parse import quote
-
-        q = quote((title or "Israel jobs")[:120])
-        return f"https://www.linkedin.com/jobs/search/?keywords={q}&location=Israel"
+    # Never invent fake t.me / Facebook / IL-board / LinkedIn-search URLs.
+    _ = (channel, job_id, title)
     return None
 
 
@@ -233,7 +229,7 @@ def catalog_board_job_dicts() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for i, (job_id, title, company, location, description, _domain) in enumerate(JOB_SPECS):
         source = BOARDS[i % len(BOARDS)]
-        # No synthetic employer inboxes — auto-send only when a real email is scraped
+        # No synthetic employer inboxes or fake board deep-links
         rows.append(
             {
                 "source": source,
@@ -241,7 +237,7 @@ def catalog_board_job_dicts() -> list[dict[str, Any]]:
                 "title": title,
                 "company": company,
                 "location": location,
-                "url": f"https://www.{source}.co.il/search?ref=ai-agent&id={job_id}",
+                "url": None,
                 "description": description,
                 "posted_at": now,
                 "apply_email": None,
