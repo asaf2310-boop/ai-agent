@@ -222,8 +222,9 @@ export function HomeClient({ email }: { email?: string | null }) {
           }),
         });
         const json = await res.json().catch(() => ({}));
-        if (res.ok && json.ok) {
-          // Always: remove from pool, status נשלח, go to history
+
+        // Real submit succeeded → history
+        if (res.ok && json.ok && json.formSubmitted !== false) {
           setMatches((prev) =>
             prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
           );
@@ -256,15 +257,31 @@ export function HomeClient({ email }: { email?: string | null }) {
           });
           setMessage(json.detail || "נשלח ✓ — המשרה עברה להיסטוריה");
           setTab("history");
-          // Refresh in background after switching tabs
           void loadApplications(resume?.id, { quiet: true });
           void loadMatches(resume?.id, { quiet: true });
           return;
         }
 
+        // Could not auto-submit — keep in pool, continue with CV / site form
+        const openUrl = safeJobOpenUrl({
+          url: json.job?.url || job?.url,
+          title: json.job?.title || job?.title,
+          source: job?.source,
+          channel: job?.channel,
+          external_id: job?.external_id,
+        });
+        setAutofillJob({
+          jobId,
+          title: json.job?.title || job?.title,
+          company: json.job?.company || job?.company,
+          url: openUrl || json.job?.url || job?.url,
+          tailoredCvText: json.tailoredCv || null,
+        });
+        setTab("cv");
         setMessage(
-          json.error ||
-            "ההגשה נכשלה — המשרה נשארה בפול. נסה שוב או הסר ידנית.",
+          json.detail ||
+            json.error ||
+            "לא ניתן להגיש אוטומטית — המשרה בפול. כאן אפשר להמשיך לשלוח את הקו״ח.",
         );
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");

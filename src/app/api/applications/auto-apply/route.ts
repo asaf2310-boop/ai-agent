@@ -7,14 +7,12 @@ import { requireUser } from "@/lib/auth";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tryAutoWebApply, canAutoApplyJob } from "@/lib/web-apply";
-import { hasActiveJobLink } from "@/lib/linkedin-url";
+import { hasActiveJobLink, safeJobOpenUrl } from "@/lib/linkedin-url";
 
 /**
- * User clicked «הגש אוטומטית»:
- * 1) try real ATS/career form submit when possible
- * 2) always mark status=sent, clear from pool, appear in history
- *
- * Form POST failure must not leave the job stuck in the pool.
+ * «הגש אוטומטית»:
+ * - If the employer form can be submitted → status sent, leave pool, history
+ * - If not → do NOT mark sent; return tailored CV so the user can continue applying
  */
 export async function POST(request: Request) {
   try {
@@ -79,14 +77,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    // Allow click for any openable job, or jobs we previously treated as auto-applyable
-    const openable = hasActiveJobLink(job);
-    if (!openable && !canAutoApplyJob(job)) {
+    if (!hasActiveJobLink(job) && !canAutoApplyJob(job)) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "אין קישור הגשה למשרה הזו. השתמש ב״מלא טופס מהקו״ח״ או הסר מהפול.",
+          needsManual: true,
+          error: "אין קישור הגשה. השתמש ב״מלא טופס מהקו״ח״.",
         },
         { status: 422 },
       );
@@ -105,6 +101,7 @@ export async function POST(request: Request) {
         application: current,
         alreadySent: true,
         ok: true,
+        formSubmitted: true,
         status: "sent",
         detail: "כבר נשלח — מופיע בהיסטוריה",
         clearedFromPool: true,
@@ -125,8 +122,17 @@ export async function POST(request: Request) {
       insights = asPlainText(tailored.insights);
       tailoredCv = asPlainText(tailored.tailoredCv) || tailoredCv;
     } catch {
-      // Tailoring is optional — apply / mark-sent must still proceed
+      // optional
     }
+
+    const openUrl =
+      safeJobOpenUrl({
+        url: job.url,
+        title: job.title,
+        source: job.source,
+        channel: job.channel,
+        external_id: job.external_id,
+      }) || job.url;
 
     let formOk = false;
     let formDetail = "";
@@ -147,13 +153,35 @@ export async function POST(request: Request) {
         formDetail =
           err instanceof Error ? err.message : "שליחת הטופס נכשלה";
       }
+    } else {
+      formDetail = "אין טופס הגשה אוטומטי למשרה הזו";
     }
 
-    const skipReason = formOk
-      ? formDetail || "נשלח אוטומטית בטופס האתר"
-      : formDetail
-        ? `נשלח (סומן ידנית) — ${formDetail}`
-        : "נשלח בלחיצה על הגש אוטומטית";
+    // Form did not go through — keep in pool, let user continue with CV
+    if (!formOk) {
+      return NextResponse.json(
+        {
+          ok: false,
+          needsManual: true,
+          formSubmitted: false,
+          error:
+            formDetail ||
+            "לא ניתן להגיש אוטומטית — המשך לשלוח את הקו״ח באתר המעסיק",
+          detail:
+            "המשרה נשארת בפול. מלא פרטים מהקו״ח ושלח באתר המעסיק.",
+          tailoredCv,
+          insights,
+          ats,
+          job: {
+            id: job.id,
+            title: job.title,
+            company: job.company,
+            url: openUrl,
+          },
+        },
+        { status: 422 },
+      );
+    }
 
     const row = {
       resume_id: resume.id,
@@ -161,10 +189,10 @@ export async function POST(request: Request) {
       match_id: body.matchId || current?.match_id || null,
       status: "sent" as const,
       method: "web-form",
-      skip_reason: skipReason,
+      skip_reason: formDetail || "נשלח אוטומטית בטופס האתר",
       recruiter_insights: insights || null,
       tailored_cv_text: tailoredCv || null,
-      error: formOk ? null : formDetail || null,
+      error: null,
       updated_at: new Date().toISOString(),
       user_id: user.id,
     };
@@ -181,11 +209,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      formSubmitted: true,
       application: data,
-      detail: formOk
-        ? "נשלח ✓ — המשרה עברה להיסטוריה"
-        : "נשלח ✓ — סומן בהיסטוריה (הטופס באתר לא אושר אוטומטית)",
-      formSubmitted: formOk,
+      detail: "נשלח ✓ — המשרה עברה להיסטוריה",
       ats,
       status: "sent",
       clearedFromPool: isClearedFromPool(data),

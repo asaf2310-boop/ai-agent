@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
-import { hasActiveJobLink, safeJobOpenUrl } from "@/lib/linkedin-url";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
+import { canAutoApplyJob } from "@/lib/web-apply";
 import {
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
@@ -282,8 +283,8 @@ export function MatchList({
               channel: job?.channel,
               external_id: job?.external_id,
             });
-            // Any openable job can be marked נשלח + moved to history
-            const showAutoApply = Boolean(job && hasActiveJobLink(job));
+            // Only when a real ATS/career form POST is possible
+            const showAutoApply = Boolean(job && canAutoApplyJob(job));
             return (
               <li key={match.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
