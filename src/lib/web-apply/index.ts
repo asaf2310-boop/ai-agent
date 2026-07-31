@@ -3,10 +3,14 @@ import {
   type CandidateProfile,
 } from "@/lib/candidate-profile";
 import { submitWebApplication, type WebApplyResult } from "@/lib/web-apply/submit";
-import { resolveApplyPageUrl } from "@/lib/web-apply/urls";
+import {
+  isKnownAtsUrl,
+  resolveApplyPageUrl,
+} from "@/lib/web-apply/urls";
 
 export type { WebApplyResult };
 export {
+  canAutoApplyViaAts,
   detectAts,
   extractExternalApplyUrl,
   isKnownAtsUrl,
@@ -20,6 +24,22 @@ export function isWebApplyEnabled(): boolean {
   return !["false", "0", "no", "off"].includes(
     (process.env.ENABLE_WEB_APPLY || "true").toLowerCase(),
   );
+}
+
+/**
+ * Show «הגש אוטומטית» only for a real ATS form we can POST.
+ * Employer email is sent automatically on scan — no misleading button.
+ * LinkedIn Easy Apply / search / demos → false.
+ */
+export function canAutoApplyJob(job: {
+  url?: string | null;
+  description?: string | null;
+  apply_email?: string | null;
+  company?: string | null;
+}): boolean {
+  if (!isWebApplyEnabled()) return false;
+  const page = resolveApplyPageUrl(job);
+  return Boolean(page && isKnownAtsUrl(page));
 }
 
 /** Auto-fill + submit on the job's apply page when an ATS/careers URL exists. */
@@ -39,7 +59,7 @@ export async function tryAutoWebApply(input: {
   if (!isWebApplyEnabled()) return null;
 
   const applyUrl = resolveApplyPageUrl(input.job);
-  if (!applyUrl) {
+  if (!applyUrl || !isKnownAtsUrl(applyUrl)) {
     return {
       ok: false,
       method: "web-form",

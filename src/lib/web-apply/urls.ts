@@ -89,12 +89,22 @@ export function resolveApplyPageUrl(job: {
   description?: string | null;
 }): string | null {
   const fromDesc = extractExternalApplyUrl(job.description);
-  if (fromDesc && detectAts(fromDesc) !== "unsupported") return fromDesc;
+  if (fromDesc && isKnownAtsUrl(fromDesc)) return fromDesc;
 
   const url = (job.url || "").trim();
   if (!url) return null;
-  if (isSyntheticJobBoardUrl(url)) return fromDesc;
-  if (isLinkedInOrSocialUrl(url)) return fromDesc;
-  if (detectAts(url) === "unsupported") return fromDesc;
-  return url;
+  if (isSyntheticJobBoardUrl(url)) return fromDesc && isKnownAtsUrl(fromDesc) ? fromDesc : null;
+  if (isLinkedInOrSocialUrl(url)) return fromDesc && isKnownAtsUrl(fromDesc) ? fromDesc : null;
+  if (isKnownAtsUrl(url)) return url;
+  return null;
 }
+
+/** True only when we can POST a known ATS form page (not LinkedIn/search/demos). */
+export function canAutoApplyViaAts(job: {
+  url?: string | null;
+  description?: string | null;
+}): boolean {
+  const page = resolveApplyPageUrl(job);
+  return Boolean(page && isKnownAtsUrl(page));
+}
+
