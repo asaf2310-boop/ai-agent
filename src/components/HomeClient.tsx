@@ -221,31 +221,50 @@ export function HomeClient({ email }: { email?: string | null }) {
             resumeId: resume?.id,
           }),
         });
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         if (res.ok && json.ok) {
-          // Remove from pool → mark sent → show in history
+          // Always: remove from pool, status נשלח, go to history
           setMatches((prev) =>
             prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
           );
           if (json.application) {
             setApplications((prev) => {
               const rest = prev.filter(
-                (a) => a.job_id !== jobId && a.id !== json.application.id,
+                (a) =>
+                  a.job_id !== jobId &&
+                  a.id !== json.application?.id,
               );
               return [json.application, ...rest];
             });
           }
-          await loadApplications(resume?.id, { quiet: true });
-          void loadMatches(resume?.id, { quiet: true });
+          setSummary((prev) => {
+            const base = prev || {
+              total: 0,
+              sent: 0,
+              opened: 0,
+              notSent: 0,
+              prepared: 0,
+              skipped: 0,
+              failed: 0,
+            };
+            if (json.alreadySent) return base;
+            return {
+              ...base,
+              total: base.total + 1,
+              sent: base.sent + 1,
+            };
+          });
           setMessage(json.detail || "נשלח ✓ — המשרה עברה להיסטוריה");
           setTab("history");
+          // Refresh in background after switching tabs
+          void loadApplications(resume?.id, { quiet: true });
+          void loadMatches(resume?.id, { quiet: true });
           return;
         }
 
-        // Do not open LinkedIn search / fake links — that looked like a fake apply
         setMessage(
           json.error ||
-            "אין אפשרות להגשה אוטומטית למשרה הזו (חסר מייל מעסיק או טופס ATS).",
+            "ההגשה נכשלה — המשרה נשארה בפול. נסה שוב או הסר ידנית.",
         );
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");

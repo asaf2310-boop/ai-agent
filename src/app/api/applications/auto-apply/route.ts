@@ -7,10 +7,14 @@ import { requireUser } from "@/lib/auth";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tryAutoWebApply, canAutoApplyJob } from "@/lib/web-apply";
+import { hasActiveJobLink } from "@/lib/linkedin-url";
 
 /**
- * Auto-apply to one job via ATS form when a real Greenhouse/Lever/etc. URL exists.
- * Not for LinkedIn Easy Apply or search fallbacks.
+ * User clicked «הגש אוטומטית»:
+ * 1) try real ATS/career form submit when possible
+ * 2) always mark status=sent, clear from pool, appear in history
+ *
+ * Form POST failure must not leave the job stuck in the pool.
  */
 export async function POST(request: Request) {
   try {
@@ -75,12 +79,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    if (!canAutoApplyJob(job)) {
+    // Allow click for any openable job, or jobs we previously treated as auto-applyable
+    const openable = hasActiveJobLink(job);
+    if (!openable && !canAutoApplyJob(job)) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "אין הגשה אוטומטית למשרה הזו — חסר מייל מעסיק או טופס הגשה באתר. השתמש במילוי ידני.",
+            "אין קישור הגשה למשרה הזו. השתמש ב״מלא טופס מהקו״ח״ או הסר מהפול.",
         },
         { status: 422 },
       );
@@ -88,7 +94,7 @@ export async function POST(request: Request) {
 
     const { data: existing } = await supabase
       .from("applications")
-      .select("*")
+      .select("*, jobs(*)")
       .eq("user_id", user.id)
       .eq("resume_id", resume.id)
       .eq("job_id", body.jobId)
@@ -107,33 +113,47 @@ export async function POST(request: Request) {
 
     const resumeText =
       resume.extracted_text || (resume.skills || []).join(" ") || "";
-    const tailored = await tailorResumeForJob({
-      resumeText,
-      jobTitle: job.title,
-      jobCompany: job.company,
-      jobDescription: job.description,
-    });
-    const insights = asPlainText(tailored.insights);
-    const tailoredCv = asPlainText(tailored.tailoredCv);
-
-    const web = await tryAutoWebApply({
-      job,
-      resumeText,
-      skills: resume.skills || [],
-      tailoredCv,
-      insights,
-    });
-
-    if (!web?.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: web?.detail || "הגשה אוטומטית נכשלה",
-          ats: web?.ats,
-        },
-        { status: 422 },
-      );
+    let insights = "";
+    let tailoredCv = resumeText.slice(0, 4000);
+    try {
+      const tailored = await tailorResumeForJob({
+        resumeText,
+        jobTitle: job.title,
+        jobCompany: job.company,
+        jobDescription: job.description,
+      });
+      insights = asPlainText(tailored.insights);
+      tailoredCv = asPlainText(tailored.tailoredCv) || tailoredCv;
+    } catch {
+      // Tailoring is optional — apply / mark-sent must still proceed
     }
+
+    let formOk = false;
+    let formDetail = "";
+    let ats: string | undefined;
+    if (canAutoApplyJob(job)) {
+      try {
+        const web = await tryAutoWebApply({
+          job,
+          resumeText,
+          skills: resume.skills || [],
+          tailoredCv,
+          insights,
+        });
+        formOk = Boolean(web?.ok);
+        formDetail = web?.detail || "";
+        ats = web?.ats;
+      } catch (err) {
+        formDetail =
+          err instanceof Error ? err.message : "שליחת הטופס נכשלה";
+      }
+    }
+
+    const skipReason = formOk
+      ? formDetail || "נשלח אוטומטית בטופס האתר"
+      : formDetail
+        ? `נשלח (סומן ידנית) — ${formDetail}`
+        : "נשלח בלחיצה על הגש אוטומטית";
 
     const row = {
       resume_id: resume.id,
@@ -141,10 +161,10 @@ export async function POST(request: Request) {
       match_id: body.matchId || current?.match_id || null,
       status: "sent" as const,
       method: "web-form",
-      skip_reason: web.detail || "הוגש אוטומטית בטופס האתר",
-      recruiter_insights: insights,
-      tailored_cv_text: tailoredCv,
-      error: null,
+      skip_reason: skipReason,
+      recruiter_insights: insights || null,
+      tailored_cv_text: tailoredCv || null,
+      error: formOk ? null : formDetail || null,
       updated_at: new Date().toISOString(),
       user_id: user.id,
     };
@@ -162,8 +182,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       application: data,
-      detail: web.detail || "נשלח ✓ — המשרה עברה להיסטוריה",
-      ats: web.ats,
+      detail: formOk
+        ? "נשלח ✓ — המשרה עברה להיסטוריה"
+        : "נשלח ✓ — סומן בהיסטוריה (הטופס באתר לא אושר אוטומטית)",
+      formSubmitted: formOk,
+      ats,
       status: "sent",
       clearedFromPool: isClearedFromPool(data),
     });
