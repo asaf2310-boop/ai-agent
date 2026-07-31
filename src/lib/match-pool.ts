@@ -1,4 +1,5 @@
 import type { Job, JobMatch } from "@/lib/types";
+import { isLiveBoardSource } from "@/lib/il-boards";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
 
 export const POOL_LIMIT = 50;
@@ -46,27 +47,41 @@ function matchesKind(job: Job | undefined, kind: MatchPoolFilters["kind"]): bool
     return source === "linkedin" || channel.includes("linkedin");
   }
   if (kind === "board") {
-    return ["alljobs", "drushim", "jobmaster", "jobnet", "gotfriends"].includes(
-      source,
-    );
+    // Live boards with real URLs (Drushim, Remotive, RemoteOK, …)
+    return isLiveBoardSource(source);
   }
   if (kind === "social") {
+    // True social posts only — not Remotive/RemoteOK board feeds
+    if (isLiveBoardSource(source) && source !== "drushim" && !source.startsWith("rss-")) {
+      return false;
+    }
     return (
-      Boolean(job.is_social) ||
       postKind === "social" ||
+      source.startsWith("social-") ||
       channel.includes("facebook") ||
       channel.includes("telegram") ||
-      channel.includes("group")
+      channel.includes("group") ||
+      (Boolean(job.is_social) &&
+        !["remoteok", "remotive", "arbeitnow", "jobicy", "drushim"].includes(
+          source,
+        ))
     );
   }
   if (kind === "freelance") {
     return postKind === "freelance" || source === "freelance";
   }
   if (kind === "job") {
-    return (
-      postKind === "job" ||
-      (!job.is_social && postKind !== "freelance" && postKind !== "social")
-    );
+    if (postKind === "freelance" || postKind === "social") return false;
+    if (postKind === "job") return true;
+    // Board / LinkedIn listings without an explicit post_kind still count as jobs
+    if (
+      source === "linkedin" ||
+      isLiveBoardSource(source) ||
+      (!job.is_social && !source.startsWith("social-"))
+    ) {
+      return true;
+    }
+    return false;
   }
   return true;
 }
@@ -75,13 +90,14 @@ function matchesLocation(job: Job | undefined, location: string): boolean {
   const q = location.trim().toLowerCase();
   if (!q) return true;
   const loc = (job?.location || "").toLowerCase();
-  return loc.includes(q);
+  const hay = `${loc} ${job?.company || ""} ${job?.description || ""}`.toLowerCase();
+  return hay.includes(q);
 }
 
 function matchesQuery(job: Job | undefined, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const hay = [job?.title, job?.company, job?.description]
+  const hay = [job?.title, job?.company, job?.description, job?.location]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -102,6 +118,7 @@ function matchesPostedDate(
 ): boolean {
   const posted = getJobPostedAt(job);
   if (!posted) {
+    // Unknown date: keep visible unless a strict date window is set
     return (
       filters.postedWithin === "all" && !filters.postedFrom && !filters.postedTo
     );

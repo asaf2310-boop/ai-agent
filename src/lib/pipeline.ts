@@ -21,7 +21,8 @@ import {
   isBrokenLinkedInUrl,
   safeJobOpenUrl,
 } from "@/lib/linkedin-url";
-import { isFakeIlBoardUrl, isCatalogIlBoardSource } from "@/lib/il-boards";
+import { fetchDrushimIsraelJobs } from "@/lib/drushim-jobs";
+import { isFakeIlBoardUrl } from "@/lib/il-boards";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
@@ -83,9 +84,8 @@ async function upsertJobBatch(
 }
 
 export async function ensureSampleJobs(supabase: DbClient) {
-  // Always upsert IL catalog + social samples (Israel only)
-  await upsertJobBatch(supabase, SAMPLE_JOBS);
-  await upsertJobBatch(supabase, SAMPLE_SOCIAL_POSTS);
+  // Catalog demos have null / fake URLs — do not seed them into the pool.
+  // Live sources (LinkedIn, Drushim, Remotive, RemoteOK) are synced separately.
   await repairBrokenLinkedInUrls(supabase);
 }
 
@@ -129,13 +129,8 @@ async function repairBrokenLinkedInUrls(supabase: DbClient) {
       external_id?: string | null;
     }>;
     for (const job of rows) {
-      // Null out fake IL board URLs (alljobs/drushim/jobnet 403/white/404)
-      if (
-        job.url &&
-        (isFakeIlBoardUrl(job.url) ||
-          isCatalogIlBoardSource(job.source) ||
-          /[?&]ref=ai-agent\b/i.test(job.url))
-      ) {
+      // Null out synthetic IL board URLs only — keep real Drushim /job/{id}/{hash}/
+      if (job.url && isFakeIlBoardUrl(job.url)) {
         try {
           await supabase.from("jobs").update({ url: null }).eq("id", job.id);
         } catch {
@@ -181,9 +176,20 @@ async function repairBrokenLinkedInUrls(supabase: DbClient) {
   }
 }
 
-/** Pull live listings — Israel only. */
+const REMOTE_ROLE =
+  /developer|engineer|react|python|full.?stack|devops|data|product|ai|llm|finance|analyst|manager|design|marketing|sales|מוצר|פיננס|ניהול|מפתח/i;
+
+/** Pull live remote boards — Israel / IL-eligible only. */
 export async function syncLiveSocialJobs(supabase: DbClient) {
   const rows: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+
+  const pushRow = (row: Record<string, unknown>) => {
+    const key = `${row.source}:${row.external_id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
 
   try {
     const res = await fetch("https://remoteok.com/api", {
@@ -201,40 +207,46 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
 
         const text = `${item.position} ${description} ${company}`;
         const freelance = /freelance|contract|gig|פרילנס/i.test(text);
-        if (!freelance && !/developer|engineer|react|python|full.?stack|devops|data/i.test(text)) {
-          continue;
-        }
-        rows.push({
+        if (!freelance && !REMOTE_ROLE.test(text)) continue;
+        pushRow({
           source: "remoteok",
           external_id: String(item.id),
           title: String(item.position),
           company: company || null,
-          location: location || "Israel",
+          location: location || "Israel / Remote",
           url: (item.url as string) || `https://remoteok.com/remote-jobs/${item.id}`,
           description: description.slice(0, 4000),
           apply_email: extractEmails(description)[0] || null,
           post_kind: freelance ? "freelance" : "job",
           channel: "remoteok",
-          is_social: true,
+          is_social: false,
           scraped_at: new Date().toISOString(),
           posted_at: item.epoch
             ? new Date(Number(item.epoch) * 1000).toISOString()
             : new Date().toISOString(),
         });
-        if (rows.length >= 30) break;
       }
     }
   } catch {
     // optional network source
   }
 
-  // Also try Remotive with Israel filter
-  try {
-    const res = await fetch(
-      "https://remotive.com/api/remote-jobs?category=software-dev&limit=50",
-      { headers: { "User-Agent": "ai-agent-job-scanner/1.0" }, next: { revalidate: 0 } },
-    );
-    if (res.ok) {
+  const remotiveQueries = [
+    "https://remotive.com/api/remote-jobs?search=Israel&limit=100",
+    "https://remotive.com/api/remote-jobs?category=software-dev&limit=50",
+    "https://remotive.com/api/remote-jobs?category=product&limit=40",
+    "https://remotive.com/api/remote-jobs?category=data&limit=40",
+    "https://remotive.com/api/remote-jobs?category=finance-legal&limit=30",
+    "https://remotive.com/api/remote-jobs?category=marketing&limit=30",
+  ];
+
+  for (const endpoint of remotiveQueries) {
+    try {
+      const res = await fetch(endpoint, {
+        headers: { "User-Agent": "ai-agent-job-scanner/1.0" },
+        next: { revalidate: 0 },
+      });
+      if (!res.ok) continue;
       const data = (await res.json()) as { jobs?: Array<Record<string, unknown>> };
       for (const item of data.jobs || []) {
         const location = String(item.candidate_required_location || "");
@@ -243,12 +255,12 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
         if (!isIsraelLocation(location, description, company)) continue;
         const url = String(item.url || "");
         if (!url) continue;
-        rows.push({
+        pushRow({
           source: "remotive",
           external_id: String(item.id || url),
           title: String(item.title || "Role"),
           company: company || null,
-          location: location || "Israel",
+          location: location || "Israel / Remote",
           url,
           description: description.slice(0, 4000),
           apply_email: extractEmails(description)[0] || null,
@@ -256,32 +268,20 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
             ? "freelance"
             : "job",
           channel: "remotive",
-          is_social: true,
+          is_social: false,
           scraped_at: new Date().toISOString(),
           posted_at: item.publication_date
             ? String(item.publication_date)
             : new Date().toISOString(),
         });
       }
+    } catch {
+      // optional
     }
-  } catch {
-    // optional
   }
 
   if (rows.length) {
-    let { error } = await supabase
-      .from("jobs")
-      .upsert(rows, { onConflict: "source,external_id" });
-    if (error && /post_kind|is_social|channel/i.test(error.message)) {
-      const stripped = rows.map((j) => {
-        const { post_kind: _pk, channel: _ch, is_social: _is, ...rest } = j;
-        return rest;
-      });
-      ({ error } = await supabase
-        .from("jobs")
-        .upsert(stripped, { onConflict: "source,external_id" }));
-    }
-    if (error) throw new Error(error.message);
+    await upsertJobBatch(supabase, rows);
   }
 
   // Remove previously ingested non-Israel remoteok/remotive noise (best-effort)
@@ -290,7 +290,7 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
       .from("jobs")
       .select("id, location, description, company, source")
       .in("source", ["remoteok", "remotive"])
-      .limit(200);
+      .limit(300);
     const badIds = ((foreign || []) as Job[])
       .filter((j) => !isIsraelLocation(j.location, j.description, j.company))
       .map((j) => j.id);
@@ -302,6 +302,18 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
   }
 
   return rows.length;
+}
+
+/** Live Drushim.co.il postings with real /job/{id}/{hash}/ links. */
+export async function syncDrushimJobs(supabase: DbClient) {
+  const jobs = await fetchDrushimIsraelJobs({ maxJobs: 70 });
+  if (jobs.length) {
+    await upsertJobBatch(
+      supabase,
+      jobs.map((j) => ({ ...j })),
+    );
+  }
+  return jobs.length;
 }
 
 /** LinkedIn active jobs in Israel from the past 7 days (+ prune older). */

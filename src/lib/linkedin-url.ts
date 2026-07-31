@@ -1,9 +1,6 @@
 /** LinkedIn URL helpers — avoid fake/demo IDs that show LinkedIn's error page. */
 
-import {
-  isCatalogIlBoardSource,
-  isFakeIlBoardUrl,
-} from "@/lib/il-boards";
+import { isFakeIlBoardUrl } from "@/lib/il-boards";
 
 const NUMERIC_JOB_ID = /^\d{5,20}$/;
 
@@ -124,8 +121,9 @@ export function safeJobOpenUrl(job: {
   const url = (job.url || "").trim();
   if (!url) return null;
 
-  // Catalog IL boards open white/403/404 — never open them
-  if (isFakeIlBoardUrl(url) || isCatalogIlBoardSource(job.source)) {
+  // Synthetic IL board demos open white/403/404 — never open them.
+  // Live Drushim `/job/{id}/{hash}/` rows are allowed.
+  if (isFakeIlBoardUrl(url)) {
     return null;
   }
 
@@ -168,15 +166,9 @@ export function hasActiveJobLink(job: {
   external_id?: string | null;
 } | null | undefined): boolean {
   if (!job) return false;
-  // Catalog board sources have no real deep-links yet
-  if (isCatalogIlBoardSource(job.source)) return false;
   const raw = (job.url || "").trim();
   if (!raw || !/^https?:\/\//i.test(raw)) return false;
   if (isFakeIlBoardUrl(raw)) return false;
-  // Catalog fake IL board search pages
-  if (/[?&]ref=ai-agent\b/i.test(raw) || /\/search\?ref=ai-agent/i.test(raw)) {
-    return false;
-  }
   if (isBrokenLinkedInUrl(raw)) return false;
   // Keyword search is not a specific job posting
   if (/linkedin\.com\/jobs\/search/i.test(raw)) return false;
