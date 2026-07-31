@@ -1,15 +1,22 @@
-# AI Agent — Israel job search
+# AllIn — AI Agent (Israel job search)
 
-Next.js on Vercel, Supabase for data/storage, GitHub Actions for twice-daily refresh + auto applications.
+Next.js app (installable PWA) on Vercel, Supabase for data/storage, GitHub Actions for twice-daily refresh + auto applications.
 
 ## Structure
 
 | Path | Role |
 |------|------|
-| `src/` | Next.js UI — upload CV, matches, application report |
+| `src/` | AllIn app UI — login, home, match pool, history, CV autofill |
 | `job-agent/` | Python scan / match / tailor / apply (`refresh.py`) |
 | `supabase/migrations/` | SQL schema (`job_agent`) |
 | `.github/workflows/` | Twice-daily cron |
+
+## App
+
+- Hebrew RTL product UI branded **AllIn**
+- Bottom navigation: בית · פול · היסטוריה · קו״ח
+- Install to home screen (PWA / `manifest.webmanifest`)
+- Google/Gmail login; data scoped per user
 
 ## Setup
 
