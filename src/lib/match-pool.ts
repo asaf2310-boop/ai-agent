@@ -29,6 +29,16 @@ export function getJobPostedAt(job?: Job | null): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Best CV match first; break ties by newest posting. */
+export function sortMatchesByBestFit(matches: JobMatch[]): JobMatch[] {
+  return [...matches].sort((a, b) => {
+    const byScore = (b.score ?? 0) - (a.score ?? 0);
+    if (Math.abs(byScore) > 0.001) return byScore;
+    return getJobPostedAt(b.jobs) - getJobPostedAt(a.jobs);
+  });
+}
+
+/** @deprecated prefer sortMatchesByBestFit — kept for callers that want date-first */
 export function sortMatchesByNewest(matches: JobMatch[]): JobMatch[] {
   return [...matches].sort((a, b) => {
     const byDate = getJobPostedAt(b.jobs) - getJobPostedAt(a.jobs);
@@ -167,7 +177,7 @@ export function buildPoolMatches(
   filters: MatchPoolFilters = DEFAULT_POOL_FILTERS,
   limit = POOL_LIMIT,
 ): JobMatch[] {
-  return sortMatchesByNewest(filterMatches(matches, filters)).slice(0, limit);
+  return sortMatchesByBestFit(filterMatches(matches, filters)).slice(0, limit);
 }
 
 export function uniqueLocations(matches: JobMatch[]): string[] {

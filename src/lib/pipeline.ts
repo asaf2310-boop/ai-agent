@@ -25,6 +25,7 @@ import { fetchDrushimIsraelJobs } from "@/lib/drushim-jobs";
 import { isFakeIlBoardUrl } from "@/lib/il-boards";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
+import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Job, JobMatch, Resume } from "@/lib/types";
 import { canAutoApplyJob, tryAutoWebApply } from "@/lib/web-apply";
 
@@ -335,11 +336,12 @@ export async function syncLinkedInJobs(supabase: DbClient) {
 export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
-  minScore = Number(process.env.MIN_MATCH_SCORE || "0.2"),
+  minScore = Number(process.env.MIN_MATCH_SCORE || "0.32"),
   userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || resume.filename;
+  const signals = extractResumeSignals(resumeText, resume.skills || []);
 
   const { data: jobs, error } = await supabase.from("jobs").select("*");
   if (error) throw new Error(error.message);
@@ -353,7 +355,12 @@ export async function matchResumeToJobs(
   const ownerId = userId || resume.user_id;
   const matchRows = [];
   for (const job of israelJobs) {
-    const { score, reasons } = scoreMatch(resumeText, resume.skills || [], job);
+    const { score, reasons } = scoreMatch(
+      resumeText,
+      resume.skills || [],
+      job,
+      signals,
+    );
     if (score < minScore) continue;
     matchRows.push({
       resume_id: resume.id,

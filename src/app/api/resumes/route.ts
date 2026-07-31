@@ -9,7 +9,11 @@ import {
   syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
-import { extractResumeText, extractSkills } from "@/lib/resume-extract";
+import {
+  extractResumeSignals,
+  extractResumeText,
+  extractSkills,
+} from "@/lib/resume-extract";
 import type { Resume } from "@/lib/types";
 
 const BUCKET =
@@ -104,7 +108,17 @@ export async function POST(request: Request) {
       file.name,
       file.type || "",
     );
-    const skills = extractedText ? extractSkills(extractedText) : [];
+    const signals = extractedText
+      ? extractResumeSignals(extractedText)
+      : { skills: [] as string[] };
+    // Prefer concrete skills + domains; keep titles as searchable signals
+    const skills = [
+      ...new Set([
+        ...signals.skills,
+        ...(extractedText ? extractSkills(extractedText) : []),
+        ...("titles" in signals ? signals.titles || [] : []),
+      ]),
+    ].slice(0, 40);
 
     await supabase
       .from("resumes")
