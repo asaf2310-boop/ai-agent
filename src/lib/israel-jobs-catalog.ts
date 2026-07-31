@@ -3,6 +3,8 @@
  * Sources labeled like IL boards / LinkedIn until live scrapers or partner APIs exist.
  */
 
+import { linkedInJobsSearchUrl } from "@/lib/linkedin-url";
+
 export type CatalogJob = {
   source: string;
   external_id: string;
@@ -63,7 +65,7 @@ const base = (
     url:
       opts?.url ||
       (isSocial
-        ? `https://www.linkedin.com/jobs/view/${id}`
+        ? linkedInJobsSearchUrl(title)
         : boardUrl(source.includes("social") ? "linkedin" : source, id)),
     description: applyEmail
       ? `${description} הגשה במייל: ${applyEmail}`
@@ -334,10 +336,10 @@ export const ISRAEL_JOB_CATALOG: CatalogJob[] = [
       is_social: true,
       url:
         s.channel === "linkedin"
-          ? `https://www.linkedin.com/feed/update/urn:li:activity:${s.id}`
+          ? linkedInJobsSearchUrl(s.title)
           : s.channel === "telegram"
-            ? `https://t.me/s/example_il_jobs/${s.id}`
-            : `https://www.facebook.com/groups/example.il.freelance/posts/${s.id}`,
+            ? `https://t.me/s/israel_jobs`
+            : `https://www.facebook.com/jobs/`,
     }),
   ),
 ];

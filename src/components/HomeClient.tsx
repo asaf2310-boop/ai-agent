@@ -12,6 +12,7 @@ import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatchList } from "@/components/MatchList";
 import { ResumeUpload } from "@/components/ResumeUpload";
 import type { Application, JobMatch, Resume } from "@/lib/types";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
 
 type Summary = {
   total: number;
@@ -212,8 +213,15 @@ export function HomeClient({ email }: { email?: string | null }) {
           json.error ||
             "לא ניתן להגיש מהשרת — נפתח מילוי מהקו״ח. פתח את האתר והשתמש בבוקמרקלט.",
         );
-        if (job?.url) {
-          window.open(job.url, "_blank", "noopener,noreferrer");
+        if (job?.url || json.job?.url) {
+          const open = safeJobOpenUrl({
+            url: json.job?.url || job?.url,
+            title: json.job?.title || job?.title,
+            source: job?.source,
+            channel: job?.channel,
+            external_id: job?.external_id,
+          });
+          if (open) window.open(open, "_blank", "noopener,noreferrer");
         }
         setTab("cv");
         await loadMatches(resume?.id);

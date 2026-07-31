@@ -6,6 +6,7 @@ import {
   wasLinkOpened,
   wasSentToRealEmployer,
 } from "@/lib/apply-email";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
 import type { Application, Resume } from "@/lib/types";
 
 type Props = {
@@ -46,23 +47,30 @@ function ApplicationCard({
   const sent = wasSentToRealEmployer(app);
   const webForm = app.status === "sent" && app.method === "web-form";
   const employerEmail = sent && !webForm ? job?.apply_email : null;
+  const openUrl = safeJobOpenUrl({
+    url: job?.url,
+    title: job?.title,
+    source: job?.source,
+    channel: job?.channel,
+    external_id: job?.external_id,
+  });
 
   return (
     <li className="space-y-2 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="font-semibold">
-          {job?.url ? (
+          {openUrl ? (
             <a
-              href={job.url}
+              href={openUrl}
               target="_blank"
               rel="noreferrer"
               className="hover:text-[var(--accent)]"
               onClick={() => {
-                if (job.id) onOpenJobLink?.(job.id);
+                if (job?.id) onOpenJobLink?.(job.id);
               }}
             >
-              {job.title}
-              {job.company ? ` · ${job.company}` : ""}
+              {job?.title}
+              {job?.company ? ` · ${job.company}` : ""}
             </a>
           ) : (
             <>
@@ -101,15 +109,15 @@ function ApplicationCard({
           {app.recruiter_insights}
         </p>
       )}
-      {job?.url && (
+      {openUrl && (
         <p className="text-sm">
           <a
-            href={job.url}
+            href={openUrl}
             target="_blank"
             rel="noreferrer"
             className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
             onClick={() => {
-              if (job.id) onOpenJobLink?.(job.id);
+              if (job?.id) onOpenJobLink?.(job.id);
             }}
           >
             פתח טופס הגשה באתר ↗
@@ -129,7 +137,7 @@ function ApplicationCard({
               resumeId={resume.id}
               jobTitle={job?.title}
               jobCompany={job?.company}
-              jobUrl={job?.url}
+              jobUrl={openUrl}
               tailoredCvText={app.tailored_cv_text}
               compact
             />

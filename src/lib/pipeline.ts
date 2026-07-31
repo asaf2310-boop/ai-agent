@@ -16,6 +16,10 @@ import {
   fetchLinkedInIsraelJobs,
   pruneOldLinkedInJobs,
 } from "@/lib/linkedin-jobs";
+import {
+  isBrokenLinkedInUrl,
+  safeJobOpenUrl,
+} from "@/lib/linkedin-url";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
@@ -80,6 +84,38 @@ export async function ensureSampleJobs(supabase: DbClient) {
   // Always upsert IL catalog + social samples (Israel only)
   await upsertJobBatch(supabase, SAMPLE_JOBS);
   await upsertJobBatch(supabase, SAMPLE_SOCIAL_POSTS);
+  await repairBrokenLinkedInUrls(supabase);
+}
+
+/** Fix LinkedIn links with fake IDs left from older catalog seeds. */
+async function repairBrokenLinkedInUrls(supabase: DbClient) {
+  try {
+    const { data } = await supabase
+      .from("jobs")
+      .select("id, url, title, source, channel, external_id")
+      .or("source.ilike.%linkedin%,channel.ilike.%linkedin%,url.ilike.%linkedin.com%")
+      .limit(400);
+    const rows = (data || []) as Array<{
+      id: string;
+      url?: string | null;
+      title?: string | null;
+      source?: string | null;
+      channel?: string | null;
+      external_id?: string | null;
+    }>;
+    for (const job of rows) {
+      if (!isBrokenLinkedInUrl(job.url)) continue;
+      const next = safeJobOpenUrl(job);
+      if (!next || next === job.url) continue;
+      try {
+        await supabase.from("jobs").update({ url: next }).eq("id", job.id);
+      } catch {
+        // best-effort
+      }
+    }
+  } catch {
+    // best-effort
+  }
 }
 
 /** Pull live listings — Israel only. */

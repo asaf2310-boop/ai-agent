@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
+import { safeJobOpenUrl } from "@/lib/linkedin-url";
 import {
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
@@ -261,6 +262,13 @@ export function MatchList({
           {filtered.map((match) => {
             const job = match.jobs;
             const badge = kindLabel(job);
+            const openUrl = safeJobOpenUrl({
+              url: job?.url,
+              title: job?.title,
+              source: job?.source,
+              channel: job?.channel,
+              external_id: job?.external_id,
+            });
             const markOpened = () => {
               if (job?.id) onOpenJobLink?.(job.id, match.id);
             };
@@ -268,15 +276,15 @@ export function MatchList({
               <li key={match.id} className="space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="text-lg font-semibold tracking-tight">
-                    {job?.url ? (
+                    {openUrl ? (
                       <a
-                        href={job.url}
+                        href={openUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="hover:text-[var(--accent)]"
                         onClick={markOpened}
                       >
-                        {job.title}
+                        {job?.title ?? "משרה"}
                       </a>
                     ) : (
                       (job?.title ?? "משרה ללא כותרת")
@@ -320,9 +328,9 @@ export function MatchList({
                   >
                     מלא טופס מהקו״ח
                   </button>
-                  {job?.url && (
+                  {openUrl && (
                     <a
-                      href={job.url}
+                      href={openUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
