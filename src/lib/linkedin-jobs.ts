@@ -5,6 +5,7 @@
 
 import { isIsraelLocation } from "@/lib/israel";
 import { extractEmails } from "@/lib/apply-email";
+import { extractExternalApplyUrl } from "@/lib/web-apply";
 
 export type LinkedInJobRow = {
   source: string;
@@ -218,6 +219,12 @@ export async function fetchLinkedInIsraelJobs(options?: {
     if (desc.length > 80) {
       job.description = desc;
       job.apply_email = extractEmails(desc)[0] || null;
+      const applyPage = extractExternalApplyUrl(desc);
+      if (applyPage) {
+        // Prefer company ATS page for automatic form submit
+        job.url = applyPage;
+        job.description = `Apply: ${applyPage}\n\n${desc}`;
+      }
     }
   }
 

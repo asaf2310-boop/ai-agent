@@ -19,6 +19,7 @@ import {
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
+import { tryAutoWebApply } from "@/lib/web-apply";
 
 export { wasSentToEmployer, isClearedFromPool };
 
@@ -322,9 +323,8 @@ async function sendApplicationEmail(input: {
 }
 
 /**
- * Auto-apply by email when a recruiter address exists.
- * Otherwise prepare tailored CV in-app and mark as not sent.
- * Does not send alert emails to APPLICATION_NOTIFY_EMAIL.
+ * Auto-apply: email when a recruiter address exists, otherwise try web-form
+ * submit on Greenhouse/Lever/Ashby/careers pages. LinkedIn Easy Apply stays manual.
  */
 export async function processApplicationsForResume(
   supabase: DbClient,
@@ -354,6 +354,10 @@ export async function processApplicationsForResume(
   );
   const results = [];
   let urlFetchBudget = 5;
+  let webApplyBudget = Math.min(
+    Number(process.env.MAX_WEB_APPLY_PER_RUN || "10"),
+    15,
+  );
 
   for (const match of sorted.slice(0, maxApps)) {
     const job = match.jobs;
@@ -444,13 +448,7 @@ export async function processApplicationsForResume(
       status = "skipped";
       method = "disabled";
       skipReason = "שליחה אוטומטית כבויה (ENABLE_EMPLOYER_EMAIL=false)";
-    } else if (!applyEmail) {
-      status = "skipped";
-      method = isSocial ? "link-only" : "no-email";
-      skipReason = isSocial
-        ? "לא נשלח — פוסט ברשת (LinkedIn/Telegram וכו׳) בלי מייל הגשה. הגשה ידנית בקישור"
-        : "לא נשלח — אין מייל מעסיק אמיתי. קו״ח מותאם מוכן להגשה ידנית באתר";
-    } else {
+    } else if (applyEmail) {
       const emailBody = [
         `שלום,`,
         ``,
@@ -490,6 +488,34 @@ export async function processApplicationsForResume(
         error = sent.error || "שליחה למעסיק נכשלה";
         skipReason = explainResendFailure(sent.error);
       }
+    } else if (webApplyBudget > 0) {
+      webApplyBudget -= 1;
+      const web = await tryAutoWebApply({
+        job,
+        resumeText,
+        skills: resume.skills || [],
+        tailoredCv,
+        insights,
+      });
+      if (web?.ok) {
+        status = "sent";
+        method = "web-form";
+        skipReason = web.detail || "הוגש אוטומטית בטופס האתר";
+      } else {
+        status = "skipped";
+        method = isSocial ? "link-only" : "no-web-form";
+        skipReason =
+          web?.detail ||
+          (isSocial
+            ? "לא הוגש — פוסט ברשת בלי טופס/מייל. פתח קישור והגש עם מילוי מהקו״ח"
+            : "לא הוגש אוטומטית — אין מייל/טופס נגיש. השתמש ב״הגש אוטומטית״ או מילוי ידני");
+      }
+    } else {
+      status = "skipped";
+      method = isSocial ? "link-only" : "no-email";
+      skipReason = isSocial
+        ? "לא נשלח — פוסט ברשת בלי מייל/טופס הגשה"
+        : "לא נשלח — אין מייל מעסיק; מכסת הגשות אתר לסריקה זו מלאה";
     }
 
     // Persist only real employer sends. Failures / skips stay out of history DB.

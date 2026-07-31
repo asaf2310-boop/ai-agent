@@ -33,6 +33,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [loadingMatches, setLoadingMatches] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [autoApplyBusyId, setAutoApplyBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [autofillJob, setAutofillJob] = useState<{
     jobId?: string;
@@ -171,6 +172,60 @@ export function HomeClient({ email }: { email?: string | null }) {
     }
   }
 
+  const autoApplyFromMatch = useCallback(
+    async (match: JobMatch) => {
+      const job = match.jobs;
+      const jobId = job?.id || match.job_id;
+      if (!jobId) return;
+      setAutoApplyBusyId(jobId);
+      setMessage(null);
+      try {
+        const res = await fetch("/api/applications/auto-apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId,
+            matchId: match.id,
+            resumeId: resume?.id,
+          }),
+        });
+        const json = await res.json();
+        if (res.ok && json.ok) {
+          setMessage(json.detail || "הוגש אוטומטית בטופס האתר ✓");
+          await Promise.all([
+            loadMatches(resume?.id),
+            loadApplications(resume?.id),
+          ]);
+          setTab("history");
+          return;
+        }
+
+        // Fallback: open assisted fill flow
+        setAutofillJob({
+          jobId,
+          title: json.job?.title || job?.title,
+          company: json.job?.company || job?.company,
+          url: json.job?.url || job?.url,
+          tailoredCvText: json.tailoredCvText,
+        });
+        setMessage(
+          json.error ||
+            "לא ניתן להגיש מהשרת — נפתח מילוי מהקו״ח. פתח את האתר והשתמש בבוקמרקלט.",
+        );
+        if (job?.url) {
+          window.open(job.url, "_blank", "noopener,noreferrer");
+        }
+        setTab("cv");
+        await loadMatches(resume?.id);
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");
+      } finally {
+        setAutoApplyBusyId(null);
+      }
+    },
+    [resume, loadMatches, loadApplications],
+  );
+
   async function handleUploaded(
     next: Resume,
     meta?: { matches?: JobMatch[]; applications?: Application[] },
@@ -202,7 +257,7 @@ export function HomeClient({ email }: { email?: string | null }) {
         loadApplications(json.resume?.id || resume?.id),
       ]);
       setMessage(
-        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · נשלח: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
+        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
       );
       setTab("pool");
     } catch (err) {
@@ -237,8 +292,8 @@ export function HomeClient({ email }: { email?: string | null }) {
                 סוכן המשרות שלך בישראל
               </h1>
               <p className="max-w-md text-sm leading-relaxed text-[var(--muted)]">
-                סורק LinkedIn ולוחות דרושים, מתאים לקו״ח, ושולח או פותח הגשה —
-                הכל במקום אחד.
+                סורק LinkedIn ולוחות דרושים, מתאים לקו״ח, שולח במייל או מגיש
+                אוטומטית בטופס האתר — הכל במקום אחד.
               </p>
             </header>
 
@@ -261,7 +316,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 <p className="text-2xl font-semibold text-[var(--accent)]">
                   {sentCount}
                 </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">נשלח</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">הוגש</p>
               </button>
               <button
                 type="button"
@@ -285,7 +340,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 {pipelineBusy
                   ? "רץ…"
                   : resume
-                    ? "הפעל סריקה + שליחה"
+                    ? "הפעל סריקה + הגשה אוטומטית"
                     : "העלה קו״ח כדי להתחיל"}
               </button>
               {!resume && (
@@ -312,7 +367,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  עד 50 משרות · סינון לפי סוג, תאריך ומיקום · החדשה ביותר קודם
+                  עד 50 · הגשה אוטומטית בטופס/מייל · או מילוי מהקו״ח
                 </p>
               </div>
               <div className="flex gap-2">
@@ -343,6 +398,8 @@ export function HomeClient({ email }: { email?: string | null }) {
                 void markJobOpened(jobId, matchId);
               }}
               onPrepareApply={prepareApplyFromMatch}
+              onAutoApply={(m) => void autoApplyFromMatch(m)}
+              autoApplyBusyId={autoApplyBusyId}
             />
           </section>
         )}
@@ -352,7 +409,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">היסטוריה</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  רק שליחה למייל מעסיק אמיתי או פתיחת קישור
+                  מייל מעסיק · הגשה באתר · פתיחת קישור
                 </p>
             </div>
             <ApplicationReport

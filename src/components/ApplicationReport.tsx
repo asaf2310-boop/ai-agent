@@ -25,6 +25,9 @@ type Props = {
 };
 
 function statusLabel(app: Application): string {
+  if (app.status === "sent" && app.method === "web-form") {
+    return "הוגש באתר";
+  }
   if (wasSentToRealEmployer(app)) return "נשלח למעסיק";
   if (wasLinkOpened(app)) return "נפתח";
   return "";
@@ -41,8 +44,8 @@ function ApplicationCard({
 }) {
   const job = app.jobs;
   const sent = wasSentToRealEmployer(app);
-  const opened = wasLinkOpened(app);
-  const employerEmail = sent ? job?.apply_email : null;
+  const webForm = app.status === "sent" && app.method === "web-form";
+  const employerEmail = sent && !webForm ? job?.apply_email : null;
 
   return (
     <li className="space-y-2 py-4">
@@ -75,13 +78,19 @@ function ApplicationCard({
       <p className="text-xs text-[var(--muted)]">
         {[job?.location, job?.channel || job?.source].filter(Boolean).join(" · ")}
       </p>
+      {webForm && (
+        <p className="text-sm text-[var(--foreground)]/85">
+          הוגש אוטומטית בטופס ההגשה באתר המעסיק
+          {app.skip_reason ? ` — ${app.skip_reason}` : ""}.
+        </p>
+      )}
       {sent && employerEmail && (
         <p className="text-sm text-[var(--foreground)]/85">
           <span className="font-medium">נשלח אל מייל המעסיק: </span>
           {employerEmail}
         </p>
       )}
-      {sent && (
+      {sent && !webForm && (
         <p className="text-xs text-[var(--muted)]">
           המעסיק יכול להשיב ישירות למייל שלך (Reply-To).
         </p>
@@ -189,7 +198,7 @@ export function ApplicationReport({
       <div className="flex flex-wrap gap-3 text-sm text-[var(--muted)]">
         <span>בהיסטוריה: {history.length}</span>
         <span className="font-medium text-[var(--accent)]">
-          נשלח למעסיק: {sentCount}
+          נשלח/הוגש: {sentCount}
         </span>
         <span className="font-medium text-[var(--accent)]">
           נפתח: {openedCount}
@@ -198,19 +207,19 @@ export function ApplicationReport({
 
       {history.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין היסטוריה. כאן יופיעו רק משרות שנשלחו למייל מעסיק אמיתי, או
-          שנפתח הקישור שלהן מהפול.
+          עדיין אין היסטוריה. כאן יופיעו משרות שנשלחו למייל מעסיק, שהוגשו
+          אוטומטית בטופס באתר, או שנפתח הקישור שלהן מהפול.
         </p>
       ) : (
         <>
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              נשלח למייל מעסיק ({sentApps.length})
+              הוגש למעסיק ({sentApps.length})
             </h3>
             {sentApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
-                עדיין אין שליחות למייל מעסיק אמיתי. כשאין מייל בהגשה — השתמשו
-                בפתיחת הקישור ובמילוי ידני.
+                עדיין אין הגשות. כשיש מייל מעסיק — נשלח במייל; כשיש טופס
+                Greenhouse/Lever/Ashby — מגישים אוטומטית באתר.
               </p>
             ) : (
               <AppList

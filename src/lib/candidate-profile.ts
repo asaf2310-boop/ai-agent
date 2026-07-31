@@ -245,6 +245,6 @@ export function buildAutofillBookmarklet(
     .filter((f) => f.selectors.length && f.value)
     .map((f) => ({ v: f.value, s: f.selectors }));
   const json = JSON.stringify(payload);
-  const code = `(()=>{const D=${json};for(const x of D){for(const sel of x.s){document.querySelectorAll(sel).forEach(el=>{if(el&&'value'in el&&!el.value){el.value=x.v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}});}}alert('AI Agent: נוסו למלא שדות מהקו״ח. בדוק וצרף קו״ח ידנית אם צריך.');})();`;
+  const code = `(()=>{const D=${json};let n=0;for(const x of D){for(const sel of x.s){document.querySelectorAll(sel).forEach(el=>{if(!el)return;if('value'in el&&!el.value){el.focus();el.value=x.v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));n++;}});}const btn=[...document.querySelectorAll('button,input[type=submit],a')].find(el=>{const t=((el.value||el.innerText||el.getAttribute('aria-label')||'')+'').toLowerCase();return/submit|apply|send|הגש|שלח|סיום|continue|next/.test(t)&&!/cancel|close|סגור|ביטול/.test(t);});if(btn&&n>0&&confirm('AllIn: מולאו '+n+' שדות. ללחוץ על שליחה/הגשה עכשיו?\\n(צרף קו״ח ידנית אם יש שדה Upload)')){btn.click();}else{alert('AllIn: מולאו '+n+' שדות מהקו״ח. בדוק, צרף קו״ח אם צריך, והגש.');}})();`;
   return `javascript:${encodeURIComponent(code)}`;
 }

@@ -18,6 +18,8 @@ type Props = {
   loading: boolean;
   onOpenJobLink?: (jobId: string, matchId: string) => void;
   onPrepareApply?: (match: JobMatch) => void;
+  onAutoApply?: (match: JobMatch) => void;
+  autoApplyBusyId?: string | null;
 };
 
 function scoreLabel(score: number) {
@@ -68,6 +70,8 @@ export function MatchList({
   loading,
   onOpenJobLink,
   onPrepareApply,
+  onAutoApply,
+  autoApplyBusyId = null,
 }: Props) {
   const [filters, setFilters] = useState<MatchPoolFilters>(DEFAULT_POOL_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -245,8 +249,8 @@ export function MatchList({
 
       {matches.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין משרות בפול. לחץ ״הפעל סריקה + שליחה״. משרות שנשלחו או שנפתח
-          הקישור שלהן עוברות להיסטוריה.
+          עדיין אין משרות בפול. לחץ ״הפעל סריקה + הגשה אוטומטית״. משרות שהוגשו
+          או שנפתח הקישור שלהן יורדות להיסטוריה.
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
@@ -301,8 +305,18 @@ export function MatchList({
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
+                    onClick={() => onAutoApply?.(match)}
+                    disabled={autoApplyBusyId === (job?.id || match.job_id)}
+                    className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                  >
+                    {autoApplyBusyId === (job?.id || match.job_id)
+                      ? "מגיש…"
+                      : "הגש אוטומטית"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onPrepareApply?.(match)}
-                    className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+                    className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
                   >
                     מלא טופס מהקו״ח
                   </button>
