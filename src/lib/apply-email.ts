@@ -108,6 +108,7 @@ export function normalizeApplyEmail(
 export function isSyntheticApplyEmail(email: string | null | undefined): boolean {
   const e = normalizeApplyEmail(email);
   if (!e) return false;
+  // Catalog placeholders: job-*@allincenter.co.il (incl. job-ai-011@…)
   if (/^job-[a-z0-9-]+@allincenter\.co\.il$/i.test(e)) return true;
   const inbound = normalizeInboundDomain(process.env.APPLY_INBOUND_DOMAIN);
   if (inbound && new RegExp(`^job-[a-z0-9-]+@${inbound.replace(/\./g, "\\.")}$`, "i").test(e)) {
@@ -180,9 +181,50 @@ export function wasSentToEmployer(app: {
   return app.status === "sent" && app.method === "job-email";
 }
 
+/**
+ * Sent via Resend to a *real* recruiter inbox (not catalog job-*@allincenter).
+ * Requires jobs.apply_email when available on the row.
+ */
+export function wasSentToRealEmployer(app: {
+  status: string;
+  method?: string | null;
+  jobs?: { apply_email?: string | null } | null;
+}): boolean {
+  if (!wasSentToEmployer(app)) return false;
+  // Without joined job we cannot verify — treat as not a confirmed real send in history UIs
+  if (!app.jobs) return false;
+  if (!app.jobs.apply_email) return false;
+  return !isSyntheticApplyEmail(app.jobs.apply_email);
+}
+
 /** User opened the job link — treat as handled for the pool. */
 export function wasLinkOpened(app: { method?: string | null }): boolean {
   return app.method === "link-opened";
+}
+
+/** History tab: real employer email sends + link opens only (never failures / fakes). */
+export function isHistoryEntry(app: {
+  status: string;
+  method?: string | null;
+  jobs?: { apply_email?: string | null } | null;
+}): boolean {
+  return wasSentToRealEmployer(app) || wasLinkOpened(app);
+}
+
+/** Failed / prepared / skipped / fake "sent" rows — never belong in History. */
+export function isJunkApplicationRow(app: {
+  status: string;
+  method?: string | null;
+  jobs?: { apply_email?: string | null } | null;
+}): boolean {
+  if (app.status === "failed" || app.status === "prepared" || app.status === "skipped") {
+    return true;
+  }
+  // "Sent" that was not to a verified real employer inbox
+  if (wasSentToEmployer(app) && !wasSentToRealEmployer(app)) {
+    return true;
+  }
+  return false;
 }
 
 /** Sent or link-opened → leave active pool, stay in history only. */

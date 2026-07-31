@@ -492,12 +492,13 @@ export async function processApplicationsForResume(
       }
     }
 
-    // History only for sent / failed-send. Skipped (no real employer email) stay out.
-    if (status === "skipped") {
+    // Persist only real employer sends. Failures / skips stay out of history DB.
+    if (status !== "sent") {
       results.push({
         status,
         method,
         skip_reason: skipReason,
+        error,
         job,
       });
       continue;
@@ -512,7 +513,7 @@ export async function processApplicationsForResume(
       skip_reason: skipReason,
       recruiter_insights: insights,
       tailored_cv_text: tailoredCv,
-      error,
+      error: null,
       updated_at: new Date().toISOString(),
       ...(ownerId ? { user_id: ownerId } : {}),
     };

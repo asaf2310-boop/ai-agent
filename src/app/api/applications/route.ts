@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { wasLinkOpened, wasSentToEmployer } from "@/lib/apply-email";
+import {
+  isHistoryEntry,
+  isJunkApplicationRow,
+  wasLinkOpened,
+  wasSentToRealEmployer,
+} from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -17,7 +22,7 @@ export async function GET(request: Request) {
       .select("*, jobs(*)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(200);
 
     if (resumeId) {
       query = query.eq("resume_id", resumeId);
@@ -43,15 +48,26 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const applications = (data ?? []).filter(
-      (a) =>
-        wasSentToEmployer(a) ||
-        wasLinkOpened(a) ||
-        a.status === "failed",
-    );
-    const sent = applications.filter((a) => wasSentToEmployer(a)).length;
+    const rows = data ?? [];
+
+    // Purge noise: send-failures + "sent" to synthetic catalog inboxes
+    const junkIds = rows
+      .filter((a) => isJunkApplicationRow(a))
+      .map((a) => a.id)
+      .filter(Boolean);
+
+    if (junkIds.length) {
+      try {
+        await supabase.from("applications").delete().in("id", junkIds);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+
+    const applications = rows.filter((a) => isHistoryEntry(a));
+    const sent = applications.filter((a) => wasSentToRealEmployer(a)).length;
     const opened = applications.filter(
-      (a) => wasLinkOpened(a) && !wasSentToEmployer(a),
+      (a) => wasLinkOpened(a) && !wasSentToRealEmployer(a),
     ).length;
     const summary = {
       total: applications.length,
@@ -60,7 +76,7 @@ export async function GET(request: Request) {
       notSent: 0,
       prepared: 0,
       skipped: 0,
-      failed: applications.filter((a) => a.status === "failed").length,
+      failed: 0,
     };
 
     return NextResponse.json({ applications, summary });
