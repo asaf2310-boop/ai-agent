@@ -101,12 +101,12 @@ export async function GET(request: Request) {
 
     let clearedJobIds = new Set<string>();
     try {
-      let appsQuery = supabase
+      // All dismissals / sends for this user (any resume) must hide the job
+      const { data: apps } = await supabase
         .from("applications")
         .select("job_id, status, method")
-        .eq("user_id", user.id);
-      if (resumeId) appsQuery = appsQuery.eq("resume_id", resumeId);
-      const { data: apps } = await appsQuery.limit(300);
+        .eq("user_id", user.id)
+        .limit(500);
       clearedJobIds = new Set(
         (apps || [])
           .filter((a) => isClearedFromPool(a))
@@ -119,7 +119,10 @@ export async function GET(request: Request) {
 
     const available = sortMatchesByBestFit(
       matches.filter(
-        (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
+        (m) =>
+          !clearedJobIds.has(m.job_id) &&
+          !clearedJobIds.has(m.jobs?.id || "") &&
+          hasActiveJobLink(m.jobs),
       ),
     );
 
