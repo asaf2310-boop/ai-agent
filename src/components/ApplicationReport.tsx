@@ -30,7 +30,7 @@ function statusLabel(app: Application): string {
     return "הוגש באתר";
   }
   if (wasSentToRealEmployer(app)) return "נשלח למעסיק";
-  if (wasLinkOpened(app)) return "נפתח";
+  if (wasLinkOpened(app)) return "הוסר מהפול";
   return "";
 }
 

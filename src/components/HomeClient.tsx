@@ -323,7 +323,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 <p className="text-2xl font-semibold text-[var(--accent)]">
                   {openedCount}
                 </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">נפתח</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">הוסר</p>
               </button>
             </div>
 
