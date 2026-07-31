@@ -159,8 +159,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       application: data,
-      detail: web.detail,
+      detail: web.detail || "נשלח ✓ — המשרה עברה להיסטוריה",
       ats: web.ats,
+      status: "sent",
       clearedFromPool: isClearedFromPool(data),
     });
   } catch (err) {

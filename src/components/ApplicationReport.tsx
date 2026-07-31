@@ -28,9 +28,9 @@ type Props = {
 
 function statusLabel(app: Application): string {
   if (app.status === "sent" && app.method === "web-form") {
-    return "הוגש באתר";
+    return "נשלח";
   }
-  if (wasSentToRealEmployer(app)) return "נשלח למעסיק";
+  if (wasSentToRealEmployer(app)) return "נשלח";
   if (wasLinkOpened(app)) return "הוסר מהפול";
   return "";
 }
@@ -100,7 +100,7 @@ function ApplicationCard({
       )}
       {webForm && (
         <p className="text-sm text-[var(--foreground)]/85">
-          הוגש אוטומטית בטופס ההגשה באתר המעסיק
+          נשלח אוטומטית בטופס ההגשה באתר המעסיק
           {app.skip_reason ? ` — ${app.skip_reason}` : ""}.
         </p>
       )}
