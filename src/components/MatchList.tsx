@@ -11,6 +11,15 @@ function scoreLabel(score: number) {
   return `${Math.round(score * 100)}%`;
 }
 
+function kindLabel(job: JobMatch["jobs"]) {
+  if (!job) return null;
+  if (job.post_kind === "freelance" || job.is_social) {
+    if (job.post_kind === "freelance") return "פרילנס / פוסט";
+    if (job.is_social) return "פוסט ברשת";
+  }
+  return null;
+}
+
 export function MatchList({ matches, loading }: Props) {
   if (loading) {
     return <p className="text-sm text-[var(--muted)]">טוען התאמות…</p>;
@@ -19,7 +28,8 @@ export function MatchList({ matches, loading }: Props) {
   if (matches.length === 0) {
     return (
       <p className="text-sm text-[var(--muted)]">
-        עדיין אין התאמות. העלה קו״ח והמתן לרענון היומי, או הפעל את ה-agent ידנית.
+        עדיין אין התאמות. העלה קו״ח או לחץ ״הפעל סריקה + שליחה״ — כולל פוסטים
+        ברשתות ופרילנס.
       </p>
     );
   }
@@ -28,6 +38,7 @@ export function MatchList({ matches, loading }: Props) {
     <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
       {matches.map((match) => {
         const job = match.jobs;
+        const badge = kindLabel(job);
         return (
           <li key={match.id} className="py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -50,13 +61,25 @@ export function MatchList({ matches, loading }: Props) {
               </span>
             </div>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              {[job?.company, job?.location, job?.source]
+              {[badge, job?.company, job?.location, job?.channel || job?.source]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
             {match.reasons?.length > 0 && (
               <p className="mt-2 text-sm text-[var(--foreground)]/80">
                 {match.reasons.join(" · ")}
+              </p>
+            )}
+            {job?.url && (job.is_social || job.post_kind === "freelance") && (
+              <p className="mt-2">
+                <a
+                  href={job.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                >
+                  פתח פוסט / קישור להגשה ↗
+                </a>
               </p>
             )}
           </li>

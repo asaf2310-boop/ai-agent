@@ -39,4 +39,5 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           APPLICATION_NOTIFY_EMAIL: ${{ secrets.APPLICATION_NOTIFY_EMAIL }}
           APPLICATION_FROM_EMAIL: ${{ secrets.APPLICATION_FROM_EMAIL }}
+          SOCIAL_RSS_URLS: ${{ secrets.SOCIAL_RSS_URLS }}
         run: python refresh.py

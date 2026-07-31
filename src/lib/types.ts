@@ -20,6 +20,9 @@ export type Job = {
   posted_at: string | null;
   scraped_at: string;
   apply_email?: string | null;
+  post_kind?: "job" | "freelance" | "social" | string;
+  channel?: string | null;
+  is_social?: boolean;
 };
 
 export type JobMatch = {

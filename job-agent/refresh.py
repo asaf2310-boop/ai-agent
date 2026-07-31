@@ -26,6 +26,9 @@ class ScrapedJob:
     description: str | None
     posted_at: datetime | None
     apply_email: str | None = None
+    post_kind: str = "job"  # job | freelance | social
+    channel: str | None = None
+    is_social: bool = False
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -92,6 +95,9 @@ def upsert_jobs(client: Client, jobs: list[ScrapedJob]) -> list[dict[str, Any]]:
             "apply_email": job.apply_email,
             "posted_at": job.posted_at.isoformat() if job.posted_at else None,
             "scraped_at": datetime.now(timezone.utc).isoformat(),
+            "post_kind": job.post_kind,
+            "channel": job.channel,
+            "is_social": job.is_social,
         }
         for job in jobs
     ]
@@ -270,35 +276,56 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         insights, tailored, _ = openai_tailor(resume_text, job)
 
         apply_email = job.get("apply_email")
+        is_social = bool(job.get("is_social")) or str(job.get("source", "")).startswith("social")
         target = apply_email or notify
         status = "prepared"
         method = "prepared"
         skip_reason = None
         error = None
 
-        body = (
-            f"מועמדות אוטומטית: {job.get('title')}\n"
-            f"חברה: {job.get('company')}\nקישור: {job.get('url')}\n\n"
-            f"מה המגייס מחפש:\n{insights}\n\nקו״ח מותאם:\n{tailored}"
-        )
+        if is_social:
+            body = (
+                f"פוסט דרושים/פרילנס מהרשת\n"
+                f"כותרת: {job.get('title')}\n"
+                f"ערוץ: {job.get('channel') or job.get('source')}\n"
+                f"סוג: {job.get('post_kind')}\n"
+                f"קישור לפוסט: {job.get('url')}\n\n"
+                f"למה זה רלוונטי:\n{insights}\n\n"
+                f"טיוטת פנייה / קו״ח מותאם:\n{tailored}"
+            )
+            subject = f"AI Agent · קישור לפוסט · {job.get('title')}"
+        else:
+            body = (
+                f"מועמדות אוטומטית: {job.get('title')}\n"
+                f"חברה: {job.get('company')}\nקישור: {job.get('url')}\n\n"
+                f"מה המגייס מחפש:\n{insights}\n\nקו״ח מותאם:\n{tailored}"
+            )
+            subject = f"AI Agent · {job.get('title')}"
 
         if not target:
-            status = "skipped"
-            method = "none"
-            skip_reason = "אין apply_email ואין APPLICATION_NOTIFY_EMAIL"
-        else:
-            ok, err, method_name = send_resend_email(
-                target,
-                f"AI Agent · {job.get('title')}",
-                body,
+            status = "prepared" if (is_social and job.get("url")) else "skipped"
+            method = "link-only" if is_social else "none"
+            skip_reason = (
+                "פוסט מהרשת — הקישור נשמר בדוח. הגדר APPLICATION_NOTIFY_EMAIL לקבלת התראה"
+                if is_social
+                else "אין apply_email ואין APPLICATION_NOTIFY_EMAIL"
             )
+        else:
+            ok, err, method_name = send_resend_email(target, subject, body)
             if ok:
                 status = "sent"
-                method = "job-email" if apply_email else "notify-email"
+                if is_social and not apply_email:
+                    method = "link-alert"
+                else:
+                    method = "job-email" if apply_email else "notify-email"
             elif err and "RESEND_API_KEY" in err:
                 status = "prepared"
-                method = "prepared"
-                skip_reason = "אין RESEND_API_KEY — הקו״ח הותאם ונשמר בדוח"
+                method = "link-only" if is_social else "prepared"
+                skip_reason = (
+                    "קישור לפוסט נשמר בדוח. חסר RESEND_API_KEY לשליחת התראה"
+                    if is_social
+                    else "אין RESEND_API_KEY — הקו״ח הותאם ונשמר בדוח"
+                )
             else:
                 status = "failed"
                 method = method_name
@@ -328,16 +355,19 @@ def run() -> None:
     min_score = float(os.getenv("MIN_MATCH_SCORE", "0.3"))
     max_age_days = int(os.getenv("MAX_JOB_AGE_DAYS", "7"))
 
+    from social_scrape import discover_social_jobs
+
     client = get_supabase(schema)
-    jobs = sample_jobs()
+    jobs = sample_jobs() + discover_social_jobs()
     upserted = upsert_jobs(client, jobs)
     pruned = prune_old_jobs(client, max_age_days)
     matches = refresh_matches(client, min_score, max_age_days)
     applied = process_applications(client, matches)
 
+    social_count = sum(1 for j in jobs if j.is_social)
     print(
         "refresh ok: "
-        f"upserted={len(upserted)} pruned={pruned} "
+        f"upserted={len(upserted)} social={social_count} pruned={pruned} "
         f"matches_written={len(matches)} applications={applied}"
     )
 

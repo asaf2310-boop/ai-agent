@@ -4,6 +4,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncLiveSocialJobs,
 } from "@/lib/pipeline";
 import { extractResumeText, extractSkills } from "@/lib/resume-extract";
 import type { Resume } from "@/lib/types";
@@ -91,6 +92,7 @@ export async function POST(request: Request) {
     const resume = data as Resume;
 
     await ensureSampleJobs(supabase);
+    await syncLiveSocialJobs(supabase);
     const matches = await matchResumeToJobs(supabase, resume);
     const applications = await processApplicationsForResume(
       supabase,

@@ -63,6 +63,21 @@ export function ApplicationReport({ applications, loading, summary }: Props) {
                     {app.recruiter_insights}
                   </p>
                 )}
+                {job?.url && (job.is_social || job.post_kind === "freelance") && (
+                  <p className="text-sm">
+                    <a
+                      href={job.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                    >
+                      קישור לפוסט / הגשה ↗
+                    </a>
+                    {job.channel ? ` · ${job.channel}` : ""}
+                    {app.method === "link-alert" ? " · נשלחה התראה במייל" : ""}
+                    {app.method === "link-only" ? " · קישור נשמר בדוח" : ""}
+                  </p>
+                )}
                 {app.skip_reason && (
                   <p className="text-sm text-[var(--muted)]">{app.skip_reason}</p>
                 )}
