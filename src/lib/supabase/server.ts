@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+/** Server client for Auth + DB. Schema only affects PostgREST, not auth. */
 export async function createClient() {
   const cookieStore = await cookies();
   const schema = process.env.NEXT_PUBLIC_SUPABASE_SCHEMA || "job_agent";
@@ -20,7 +21,7 @@ export async function createClient() {
               cookieStore.set(name, value, options),
             );
           } catch {
-            // Called from a Server Component — ignore if middleware refreshes sessions.
+            // Server Component — middleware will refresh session.
           }
         },
       },

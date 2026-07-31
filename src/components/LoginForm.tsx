@@ -1,23 +1,28 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-export function LoginForm() {
+function LoginFormInner() {
+  const searchParams = useSearchParams();
+  const error = searchParams.get("error");
+
   async function signInWithGoogle() {
     const supabase = createClient();
     const origin = window.location.origin;
-    const next = new URLSearchParams(window.location.search).get("next") || "/";
+    const next = searchParams.get("next") || "/";
 
-    await supabase.auth.signInWithOAuth({
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}`,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-        },
       },
     });
+
+    if (oauthError) {
+      alert(oauthError.message);
+    }
   }
 
   return (
@@ -35,6 +40,12 @@ export function LoginForm() {
         </p>
       </header>
 
+      {error && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          שגיאת התחברות: {error}
+        </p>
+      )}
+
       <button
         type="button"
         onClick={() => void signInWithGoogle()}
@@ -44,5 +55,13 @@ export function LoginForm() {
         התחבר עם Gmail
       </button>
     </div>
+  );
+}
+
+export function LoginForm() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-sm">טוען…</div>}>
+      <LoginFormInner />
+    </Suspense>
   );
 }
