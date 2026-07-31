@@ -167,6 +167,13 @@ export function AutofillKit({
         </p>
       )}
 
+      {fields.length > 0 && !profile.fullName && !profile.firstName && (
+        <p className="text-xs text-[var(--muted)]">
+          לא זוהה שם מהקו״ח. ודא שהשם מופיע בראש הקובץ (למשל ״ישראל ישראלי״ או
+          Name: …), או שהמייל בפורמט first.last@…
+        </p>
+      )}
+
       {!compact && (
         <div className="space-y-1 border-t border-[var(--border)] pt-3">
           <p className="text-xs font-medium">בוקמרקלט למילוי בדף ההגשה</p>
