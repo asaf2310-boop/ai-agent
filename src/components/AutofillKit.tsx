@@ -15,6 +15,7 @@ type Props = {
   jobUrl?: string | null;
   tailoredCvText?: string | null;
   resumeId?: string | null;
+  compact?: boolean;
 };
 
 export function AutofillKit({
@@ -25,6 +26,7 @@ export function AutofillKit({
   jobUrl,
   tailoredCvText,
   resumeId,
+  compact = false,
 }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
   const [dlBusy, setDlBusy] = useState(false);
@@ -120,9 +122,9 @@ export function AutofillKit({
       </div>
 
       <p className="text-xs text-[var(--muted)]">
-        הפרטים נמשכים מהקו״ח. באתרי דרושים (AllJobs / Drushim / LinkedIn) — פתח את
-        המשרה, מלא עם השדות למטה או גרור את כפתור הבוקמרקלט לשורת הסימניות ואז לחץ
-        עליו בדף ההגשה. צרף את קובץ הקו״ח ידנית בשדה העלאה.
+        {compact
+          ? "העתק שדות לטופס באתר, או הורד קו״ח לצירוף בשדה Upload."
+          : "הפרטים נמשכים אוטומטית מהקו״ח השמור. פתח את טופס המשרה באתר → העתק שדות / השתמש בבוקמרקלט → צרף את קובץ הקו״ח בהעלאה."}
       </p>
 
       {jobUrl && (
@@ -165,25 +167,27 @@ export function AutofillKit({
         </p>
       )}
 
-      <div className="space-y-1 border-t border-[var(--border)] pt-3">
-        <p className="text-xs font-medium">בוקמרקלט למילוי בדף ההגשה</p>
-        <p className="text-xs text-[var(--muted)]">
-          גרור לסימניות, פתח את טופס המשרה באתר, ולחץ על הסימנייה — ימלא שדות
-          נפוצים (שם, מייל, טלפון וכו׳).
-        </p>
-        <a
-          href={bookmarklet}
-          className="inline-block rounded-md border border-dashed border-[var(--accent)] px-3 py-2 text-xs font-medium text-[var(--accent)]"
-          onClick={(e) => {
-            e.preventDefault();
-            setMessage(
-              "גרור את הכפתור לשורת הסימניות בדפדפן (אל תלחץ כאן). אחר כך השתמש בסימנייה בדף ההגשה.",
-            );
-          }}
-        >
-          ✦ מלא טופס מהקו״ח (AI Agent)
-        </a>
-      </div>
+      {!compact && (
+        <div className="space-y-1 border-t border-[var(--border)] pt-3">
+          <p className="text-xs font-medium">בוקמרקלט למילוי בדף ההגשה</p>
+          <p className="text-xs text-[var(--muted)]">
+            גרור לסימניות, פתח את טופס המשרה באתר, ולחץ על הסימנייה — ימלא שדות
+            נפוצים (שם, מייל, טלפון וכו׳).
+          </p>
+          <a
+            href={bookmarklet}
+            className="inline-block rounded-md border border-dashed border-[var(--accent)] px-3 py-2 text-xs font-medium text-[var(--accent)]"
+            onClick={(e) => {
+              e.preventDefault();
+              setMessage(
+                "גרור את הכפתור לשורת הסימניות בדפדפן (אל תלחץ כאן). אחר כך השתמש בסימנייה בדף ההגשה.",
+              );
+            }}
+          >
+            ✦ מלא טופס מהקו״ח (AI Agent)
+          </a>
+        </div>
+      )}
 
       {message && <p className="text-xs text-[var(--muted)]">{message}</p>}
     </div>

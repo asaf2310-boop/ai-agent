@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
+import { AutofillKit } from "@/components/AutofillKit";
 import {
   wasLinkOpened,
   wasSentToEmployer,
 } from "@/lib/apply-email";
-import type { Application } from "@/lib/types";
+import type { Application, Resume } from "@/lib/types";
 
 type Props = {
   applications: Application[];
   loading: boolean;
+  resume?: Resume | null;
   summary?: {
     total: number;
     sent: number;
@@ -29,9 +32,11 @@ function statusLabel(app: Application): string {
 
 function ApplicationCard({
   app,
+  resume,
   onOpenJobLink,
 }: {
   app: Application;
+  resume?: Resume | null;
   onOpenJobLink?: (jobId: string) => void;
 }) {
   const job = app.jobs;
@@ -94,7 +99,7 @@ function ApplicationCard({
               if (job.id) onOpenJobLink?.(job.id);
             }}
           >
-            קישור למשרה / הגשה ידנית ↗
+            פתח טופס הגשה באתר ↗
           </a>
         </p>
       )}
@@ -102,10 +107,31 @@ function ApplicationCard({
         <p className="text-sm text-[var(--muted)]">{app.skip_reason}</p>
       )}
       {app.error && <p className="text-sm text-red-700">{app.error}</p>}
+
+      {resume && (
+        <details className="text-sm">
+          <summary className="cursor-pointer font-medium text-[var(--accent)]">
+            מלא פרטים מהקו״ח + הורד קובץ לצירוף
+          </summary>
+          <div className="mt-2">
+            <AutofillKit
+              resumeText={resume.extracted_text}
+              skills={resume.skills}
+              resumeId={resume.id}
+              jobTitle={job?.title}
+              jobCompany={job?.company}
+              jobUrl={job?.url}
+              tailoredCvText={app.tailored_cv_text}
+              compact
+            />
+          </div>
+        </details>
+      )}
+
       {app.tailored_cv_text && (
         <details className="text-sm">
           <summary className="cursor-pointer text-[var(--accent)]">
-            קו״ח מותאם
+            קו״ח מותאם (טקסט)
           </summary>
           <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--surface)] p-3 text-xs leading-relaxed">
             {app.tailored_cv_text}
@@ -116,9 +142,33 @@ function ApplicationCard({
   );
 }
 
+function AppList({
+  apps,
+  resume,
+  onOpenJobLink,
+}: {
+  apps: Application[];
+  resume?: Resume | null;
+  onOpenJobLink?: (jobId: string) => void;
+}) {
+  return (
+    <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+      {apps.map((app) => (
+        <ApplicationCard
+          key={app.id}
+          app={app}
+          resume={resume}
+          onOpenJobLink={onOpenJobLink}
+        />
+      ))}
+    </ul>
+  );
+}
+
 export function ApplicationReport({
   applications,
   loading,
+  resume,
   summary,
   onOpenJobLink,
 }: Props) {
@@ -151,8 +201,8 @@ export function ApplicationReport({
 
       {applications.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין רשומות. לחץ ״הפעל סריקה + שליחה״, או פתח קישור למשרה מהפול —
-          והיא תעבור לכאן להיסטוריה.
+          עדיין אין רשומות. אחרי סריקה — לכל משרה יהיה מילוי פרטים מהקו״ח והורדת
+          קובץ לצירוף בטופס באתר.
         </p>
       ) : (
         <>
@@ -160,21 +210,14 @@ export function ApplicationReport({
             <h3 className="text-lg font-semibold text-[var(--accent)]">
               היסטוריה — נשלח למעסיק ({sentApps.length})
             </h3>
-            <p className="text-sm text-[var(--muted)]">
-              ירדו מהפול ולא יחזרו אחרי סריקה.
-            </p>
             {sentApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">עדיין אין שליחות מייל.</p>
             ) : (
-              <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-                {sentApps.map((app) => (
-                  <ApplicationCard
-                    key={app.id}
-                    app={app}
-                    onOpenJobLink={onOpenJobLink}
-                  />
-                ))}
-              </ul>
+              <AppList
+                apps={sentApps}
+                resume={resume}
+                onOpenJobLink={onOpenJobLink}
+              />
             )}
           </section>
 
@@ -182,23 +225,16 @@ export function ApplicationReport({
             <h3 className="text-lg font-semibold text-[var(--accent)]">
               היסטוריה — נפתח קישור ({openedApps.length})
             </h3>
-            <p className="text-sm text-[var(--muted)]">
-              משרות שנכנסת לקישור שלהן — ירדו מהפול ולא יחזרו.
-            </p>
             {openedApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
                 עדיין לא נפתח אף קישור מהפול.
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-                {openedApps.map((app) => (
-                  <ApplicationCard
-                    key={app.id}
-                    app={app}
-                    onOpenJobLink={onOpenJobLink}
-                  />
-                ))}
-              </ul>
+              <AppList
+                apps={openedApps}
+                resume={resume}
+                onOpenJobLink={onOpenJobLink}
+              />
             )}
           </section>
 
@@ -206,21 +242,14 @@ export function ApplicationReport({
             <h3 className="text-lg font-semibold">
               ממתינות ({pendingApps.length})
             </h3>
-            <p className="text-sm text-[var(--muted)]">
-              עדיין בפול / לא נפתחו ולא נשלחו — קו״ח מותאם מוכן.
-            </p>
             {pendingApps.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">אין ממתינות.</p>
             ) : (
-              <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-                {pendingApps.map((app) => (
-                  <ApplicationCard
-                    key={app.id}
-                    app={app}
-                    onOpenJobLink={onOpenJobLink}
-                  />
-                ))}
-              </ul>
+              <AppList
+                apps={pendingApps}
+                resume={resume}
+                onOpenJobLink={onOpenJobLink}
+              />
             )}
           </section>
         </>

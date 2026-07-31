@@ -6,6 +6,7 @@ type Props = {
   matches: JobMatch[];
   loading: boolean;
   onOpenJobLink?: (jobId: string, matchId: string) => void;
+  onPrepareApply?: (match: JobMatch) => void;
 };
 
 function scoreLabel(score: number) {
@@ -21,7 +22,12 @@ function kindLabel(job: JobMatch["jobs"]) {
   return null;
 }
 
-export function MatchList({ matches, loading, onOpenJobLink }: Props) {
+export function MatchList({
+  matches,
+  loading,
+  onOpenJobLink,
+  onPrepareApply,
+}: Props) {
   if (loading) {
     return <p className="text-sm text-[var(--muted)]">טוען התאמות…</p>;
   }
@@ -44,7 +50,7 @@ export function MatchList({ matches, loading, onOpenJobLink }: Props) {
           if (job?.id) onOpenJobLink?.(job.id, match.id);
         };
         return (
-          <li key={match.id} className="py-4">
+          <li key={match.id} className="space-y-2 py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-lg font-semibold tracking-tight">
                 {job?.url ? (
@@ -75,19 +81,26 @@ export function MatchList({ matches, loading, onOpenJobLink }: Props) {
                 {match.reasons.join(" · ")}
               </p>
             )}
-            {job?.url && (
-              <p className="mt-2">
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onPrepareApply?.(match)}
+                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+              >
+                מלא טופס מהקו״ח
+              </button>
+              {job?.url && (
                 <a
                   href={job.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-sm font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                  className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--surface)]"
                   onClick={markOpened}
                 >
-                  פתח קישור / הגשה ידנית ↗
+                  פתח באתר ↗
                 </a>
-              </p>
-            )}
+              )}
+            </div>
           </li>
         );
       })}

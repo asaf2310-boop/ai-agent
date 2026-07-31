@@ -28,7 +28,7 @@ export function HomeClient() {
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [autofillJob, setAutofillJob] = useState<{
-    jobId: string;
+    jobId?: string;
     title?: string | null;
     company?: string | null;
     url?: string | null;
@@ -75,7 +75,7 @@ export function HomeClient() {
       const json = await res.json();
       if (res.ok && json.resume) {
         setResume(json.resume as Resume);
-        setMessage("נטען קו״ח שמור מהחשבון שלך — אין צורך להעלות מחדש.");
+        setMessage("נטען קו״ח שמור — פרטי מילוי טפסים זמינים למטה.");
         await Promise.all([
           loadMatches(json.resume.id),
           loadApplications(json.resume.id),
@@ -111,7 +111,9 @@ export function HomeClient() {
         if (!res.ok) throw new Error(json.error || "סימון נכשל");
 
         const job = json.application?.jobs;
-        const fromMatch = matches.find((m) => m.job_id === jobId || m.jobs?.id === jobId);
+        const fromMatch = matches.find(
+          (m) => m.job_id === jobId || m.jobs?.id === jobId,
+        );
         setAutofillJob({
           jobId,
           title: job?.title || fromMatch?.jobs?.title,
@@ -126,13 +128,38 @@ export function HomeClient() {
           loadMatches(resume?.id),
           loadApplications(resume?.id),
         ]);
-        setMessage("המשרה סומנה כנפתחה — ירדה מהפול להיסטוריה. מלא טופס עם הערכה למטה.");
+        setMessage(
+          "המשרה ירדה מהפול להיסטוריה. השתמש במילוי הפרטים למטה לטופס באתר.",
+        );
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "סימון קישור נכשל");
       }
     },
     [resume?.id, matches, applications, loadMatches, loadApplications],
   );
+
+  function prepareApplyFromMatch(match: JobMatch) {
+    const job = match.jobs;
+    const app = applications.find(
+      (a) => a.job_id === match.job_id || a.job_id === job?.id,
+    );
+    setAutofillJob({
+      jobId: job?.id || match.job_id,
+      title: job?.title,
+      company: job?.company,
+      url: job?.url,
+      tailoredCvText: app?.tailored_cv_text,
+    });
+    if (job?.id) {
+      void markJobOpened(job.id, match.id);
+    }
+    // Scroll to autofill section
+    requestAnimationFrame(() => {
+      document
+        .getElementById("autofill-section")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   async function handleUploaded(
     next: Resume,
@@ -143,9 +170,7 @@ export function HomeClient() {
       setApplications(meta.applications as Application[]);
     }
     await Promise.all([loadMatches(next.id), loadApplications(next.id)]);
-    setMessage(
-      "הקו״ח נשמר. בוצעו התאמה ושליחה — משרות שנשלחו/נפתחו עוברות להיסטוריה.",
-    );
+    setMessage("הקו״ח נשמר. אפשר למלא טפסי הגשה אוטומטית מהפרטים שנמשכו.");
   }
 
   async function runPipeline() {
@@ -185,9 +210,8 @@ export function HomeClient() {
           משרות בישראל שמתאימות לך
         </h1>
         <p className="max-w-xl text-base text-[var(--muted)]">
-          קו״ח נשמר בחשבון. סריקה, שליחה במייל כשאפשר, ומילוי פרטים אוטומטי
-          מתוך הקו״ח לטפסי הגשה באתרים — כולל הורדת קובץ לצירוף. משרה שנשלחה או
-          שנפתח הקישור שלה יורדת להיסטוריה.
+          המערכת מושכת מהקו״ח שם, מייל, טלפון ועוד — ממלאת טפסי הגשה באתרים, ונותנת
+          קובץ קו״ח לצירוף. משרה שנשלחה או שנפתח הקישור שלה יורדת להיסטוריה.
         </p>
       </header>
 
@@ -216,9 +240,30 @@ export function HomeClient() {
         )}
       </section>
 
+      {resume && (
+        <section id="autofill-section" className="space-y-3">
+          <h2 className="text-xl font-semibold">2. מילוי טפסי הגשה מהקו״ח</h2>
+          <p className="text-sm text-[var(--muted)]">
+            הפרטים נמשכים אוטומטית מהקו״ח. לחץ ״מלא טופס מהקו״ח״ על משרה בפול, או
+            השתמש בחבילה כאן + הורד קובץ לצירוף באתר הדרושים.
+          </p>
+          <AutofillKit
+            resumeText={resume.extracted_text}
+            skills={resume.skills}
+            resumeId={resume.id}
+            jobTitle={autofillJob?.title}
+            jobCompany={autofillJob?.company}
+            jobUrl={autofillJob?.url}
+            tailoredCvText={autofillJob?.tailoredCvText}
+          />
+        </section>
+      )}
+
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">2. פול התאמות</h2>
+          <h2 className="text-xl font-semibold">
+            {resume ? "3" : "2"}. פול התאמות
+          </h2>
           <div className="flex gap-2">
             <button
               type="button"
@@ -247,32 +292,18 @@ export function HomeClient() {
           onOpenJobLink={(jobId, matchId) => {
             void markJobOpened(jobId, matchId);
           }}
+          onPrepareApply={prepareApplyFromMatch}
         />
       </section>
 
-      {autofillJob && resume && (
-        <section className="space-y-3">
-          <h2 className="text-xl font-semibold">
-            מילוי טופס הגשה
-            {autofillJob.title ? ` — ${autofillJob.title}` : ""}
-          </h2>
-          <AutofillKit
-            resumeText={resume.extracted_text}
-            skills={resume.skills}
-            resumeId={resume.id}
-            jobTitle={autofillJob.title}
-            jobCompany={autofillJob.company}
-            jobUrl={autofillJob.url}
-            tailoredCvText={autofillJob.tailoredCvText}
-          />
-        </section>
-      )}
-
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">3. היסטוריה — נשלח / נפתח</h2>
+        <h2 className="text-xl font-semibold">
+          {resume ? "4" : "3"}. היסטוריה — נשלח / נפתח
+        </h2>
         <ApplicationReport
           applications={applications}
           loading={loadingApps}
+          resume={resume}
           summary={summary}
           onOpenJobLink={(jobId) => {
             const app = applications.find((a) => a.job_id === jobId);
