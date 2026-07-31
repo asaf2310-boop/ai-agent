@@ -3,10 +3,11 @@ import {
   extractEmails,
   fetchApplyEmailFromUrl,
   isClearedFromPool,
+  isSyntheticApplyEmail,
   isValidResendTo,
   normalizeApplyEmail,
   normalizeFromAddress,
-  resolveApplyEmail,
+  resolveEmployerEmail,
   wasSentToEmployer,
 } from "@/lib/apply-email";
 import { isIsraelLocation } from "@/lib/israel";
@@ -330,6 +331,7 @@ export async function processApplicationsForResume(
   resume: Resume,
   matches: JobMatch[],
   userId?: string,
+  candidateEmail?: string | null,
 ) {
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || "";
@@ -339,8 +341,9 @@ export async function processApplicationsForResume(
     (process.env.ENABLE_EMPLOYER_EMAIL || "true").toLowerCase(),
   );
   const replyTo =
-    process.env.CANDIDATE_EMAIL ||
-    process.env.APPLICATION_CANDIDATE_EMAIL ||
+    normalizeApplyEmail(candidateEmail) ||
+    normalizeApplyEmail(process.env.CANDIDATE_EMAIL) ||
+    normalizeApplyEmail(process.env.APPLICATION_CANDIDATE_EMAIL) ||
     null;
   const maxApps = Math.min(
     Number(process.env.MAX_APPLICATIONS_PER_RUN || "40"),
@@ -385,7 +388,22 @@ export async function processApplicationsForResume(
     const insights = asPlainText(tailored.insights);
     const tailoredCv = asPlainText(tailored.tailoredCv);
     const isSocial = Boolean(job.is_social) || job.source.startsWith("social");
-    let applyEmail = resolveApplyEmail(job);
+    let applyEmail = resolveEmployerEmail(job);
+    // Clear synthetic addresses left in DB from older catalog seeds
+    if (
+      job.apply_email &&
+      isSyntheticApplyEmail(job.apply_email)
+    ) {
+      applyEmail = null;
+      try {
+        await supabase
+          .from("jobs")
+          .update({ apply_email: null })
+          .eq("id", job.id);
+      } catch {
+        // best-effort
+      }
+    }
     if (
       applyEmail &&
       job.apply_email &&
@@ -402,7 +420,9 @@ export async function processApplicationsForResume(
     }
     if (!applyEmail && !isSocial && urlFetchBudget > 0) {
       urlFetchBudget -= 1;
-      applyEmail = await fetchApplyEmailFromUrl(job.url);
+      const fetched = await fetchApplyEmailFromUrl(job.url);
+      applyEmail =
+        fetched && !isSyntheticApplyEmail(fetched) ? fetched : null;
       if (applyEmail) {
         try {
           await supabase
@@ -429,7 +449,7 @@ export async function processApplicationsForResume(
       method = isSocial ? "link-only" : "no-email";
       skipReason = isSocial
         ? "לא נשלח — פוסט ברשת (LinkedIn/Telegram וכו׳) בלי מייל הגשה. הגשה ידנית בקישור"
-        : "לא נשלח — אין מייל הגשה במשרה. קו״ח מותאם מוכן להגשה ידנית";
+        : "לא נשלח — אין מייל מעסיק אמיתי. קו״ח מותאם מוכן להגשה ידנית באתר";
     } else {
       const emailBody = [
         `שלום,`,
@@ -470,6 +490,17 @@ export async function processApplicationsForResume(
         error = sent.error || "שליחה למעסיק נכשלה";
         skipReason = explainResendFailure(sent.error);
       }
+    }
+
+    // History only for sent / failed-send. Skipped (no real employer email) stay out.
+    if (status === "skipped") {
+      results.push({
+        status,
+        method,
+        skip_reason: skipReason,
+        job,
+      });
+      continue;
     }
 
     const row = {

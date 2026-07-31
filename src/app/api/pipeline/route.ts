@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { wasSentToEmployer, isClearedFromPool } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
-import { sortMatchesByNewest } from "@/lib/match-pool";
+import { POOL_LIMIT, sortMatchesByNewest } from "@/lib/match-pool";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
@@ -79,6 +79,7 @@ export async function POST(request: Request) {
       resume,
       matches,
       user.id,
+      user.email,
     );
 
     const appRows = applications as Application[];
@@ -103,17 +104,25 @@ export async function POST(request: Request) {
 
     const poolMatches = sortMatchesByNewest(
       matches.filter((m) => !clearedJobIds.has(m.job_id)),
+    ).slice(0, POOL_LIMIT);
+
+    // History payload: sent / opened / failed only (not prepared/skipped noise)
+    const historyApps = appRows.filter(
+      (a) =>
+        wasSentToEmployer(a) ||
+        a.method === "link-opened" ||
+        a.status === "failed",
     );
 
     return NextResponse.json({
       resume,
       matchesCount: poolMatches.length,
-      applicationsCount: applications.length,
+      applicationsCount: historyApps.length,
       sentCount,
-      notSentCount: applications.length - sentCount,
+      notSentCount: 0,
       openedCount: (allApps || []).filter((a) => a.method === "link-opened").length,
       matches: poolMatches,
-      applications,
+      applications: historyApps,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Pipeline failed";

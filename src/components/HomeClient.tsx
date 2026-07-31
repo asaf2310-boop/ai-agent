@@ -11,7 +11,6 @@ import { AutofillKit } from "@/components/AutofillKit";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatchList } from "@/components/MatchList";
 import { ResumeUpload } from "@/components/ResumeUpload";
-import { wasLinkOpened, wasSentToEmployer } from "@/lib/apply-email";
 import type { Application, JobMatch, Resume } from "@/lib/types";
 
 type Summary = {
@@ -44,10 +43,13 @@ export function HomeClient({ email }: { email?: string | null }) {
   } | null>(null);
 
   const pendingCount = useMemo(
-    () =>
-      applications.filter((a) => !wasSentToEmployer(a) && !wasLinkOpened(a))
-        .length,
+    () => applications.filter((a) => a.status === "failed").length,
     [applications],
+  );
+
+  const poolShownCount = useMemo(
+    () => Math.min(matches.length, 50),
+    [matches.length],
   );
 
   const loadMatches = useCallback(async (resumeId?: string) => {
@@ -203,7 +205,7 @@ export function HomeClient({ email }: { email?: string | null }) {
         loadApplications(json.resume?.id || resume?.id),
       ]);
       setMessage(
-        `סריקה הושלמה · פול ${json.matchesCount ?? 0} · נשלח ${json.sentCount ?? 0} · נפתח ${json.openedCount ?? 0}`,
+        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · נשלח: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
       );
       setTab("pool");
     } catch (err) {
@@ -250,7 +252,7 @@ export function HomeClient({ email }: { email?: string | null }) {
                 className="rounded-2xl border border-[var(--border)] bg-white/60 px-2 py-4 transition hover:bg-white/90"
               >
                 <p className="text-2xl font-semibold text-[var(--accent)]">
-                  {matches.length}
+                  {poolShownCount}
                 </p>
                 <p className="mt-1 text-xs text-[var(--muted)]">בפול</p>
               </button>
@@ -352,9 +354,9 @@ export function HomeClient({ email }: { email?: string | null }) {
           <section className="animate-rise space-y-4">
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">היסטוריה</h2>
-              <p className="text-sm text-[var(--muted)]">
-                נשלח למעסיק · נפתח קישור · ממתינות
-              </p>
+                <p className="text-sm text-[var(--muted)]">
+                  רק נשלח למעסיק / נפתח קישור / שגיאות שליחה
+                </p>
             </div>
             <ApplicationReport
               applications={applications}
@@ -429,7 +431,7 @@ export function HomeClient({ email }: { email?: string | null }) {
       <AppBottomNav
         active={tab}
         onChange={setTab}
-        poolCount={matches.length}
+        poolCount={poolShownCount}
         pendingCount={pendingCount}
       />
     </div>
