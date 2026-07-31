@@ -23,6 +23,7 @@ type Props = {
   onPrepareApply?: (match: JobMatch) => void;
   onAutoApply?: (match: JobMatch) => void;
   autoApplyBusyId?: string | null;
+  dismissBusyId?: string | null;
 };
 
 function scoreLabel(score: number) {
@@ -86,6 +87,7 @@ export function MatchList({
   onPrepareApply,
   onAutoApply,
   autoApplyBusyId = null,
+  dismissBusyId = null,
 }: Props) {
   const [filters, setFilters] = useState<MatchPoolFilters>(DEFAULT_POOL_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -285,8 +287,12 @@ export function MatchList({
             });
             // Only when a real ATS/career form POST is possible
             const showAutoApply = Boolean(job && canAutoApplyJob(job));
+            const dismissId = job?.id || match.job_id;
+            const busyDismiss = Boolean(
+              dismissId && dismissBusyId === dismissId,
+            );
             return (
-              <li key={match.id} className="space-y-2 py-4">
+              <li key={match.id} className="relative z-0 space-y-2 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="text-lg font-semibold tracking-tight">
                     {openUrl ? (
@@ -322,15 +328,15 @@ export function MatchList({
                     {match.reasons.join(" · ")}
                   </p>
                 )}
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="relative z-10 mt-2 flex flex-wrap gap-2">
                   {showAutoApply && (
                     <button
                       type="button"
                       onClick={() => onAutoApply?.(match)}
-                      disabled={autoApplyBusyId === (job?.id || match.job_id)}
-                      className="rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                      disabled={autoApplyBusyId === dismissId}
+                      className="min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
                     >
-                      {autoApplyBusyId === (job?.id || match.job_id)
+                      {autoApplyBusyId === dismissId
                         ? "מגיש…"
                         : "הגש אוטומטית"}
                     </button>
@@ -340,8 +346,8 @@ export function MatchList({
                     onClick={() => onPrepareApply?.(match)}
                     className={
                       showAutoApply
-                        ? "rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
-                        : "rounded-xl bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+                        ? "min-h-10 touch-manipulation rounded-xl border border-[var(--border)] bg-white/60 px-3 py-2 text-xs font-medium"
+                        : "min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white"
                     }
                   >
                     מלא טופס מהקו״ח
@@ -351,7 +357,7 @@ export function MatchList({
                       href={openUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="rounded-xl border border-[var(--border)] bg-white/60 px-3 py-1.5 text-xs font-medium"
+                      className="inline-flex min-h-10 touch-manipulation items-center rounded-xl border border-[var(--border)] bg-white/60 px-3 py-2 text-xs font-medium"
                     >
                       פתח באתר ↗
                     </a>
@@ -364,17 +370,21 @@ export function MatchList({
                       </span>
                     )
                   )}
-                  {job?.id && (
-                    <button
-                      type="button"
-                      onClick={() => onDismissFromPool?.(job.id, match.id)}
-                      className="rounded-xl border border-[var(--border)] bg-white/50 px-3 py-1.5 text-xs font-medium text-[var(--muted)] hover:border-red-300 hover:text-red-700"
-                      title="הסר ולא להציע משרות דומות"
-                    >
-                      לא מעוניין
-                    </button>
-                  )}
                 </div>
+                {dismissId ? (
+                  <button
+                    type="button"
+                    disabled={busyDismiss || !onDismissFromPool}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onDismissFromPool?.(dismissId, match.id);
+                    }}
+                    className="relative z-20 mt-1 flex min-h-11 w-full touch-manipulation items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-700 disabled:opacity-50"
+                  >
+                    {busyDismiss ? "מסיר…" : "לא מעוניין — הסר מהפול"}
+                  </button>
+                ) : null}
               </li>
             );
           })}

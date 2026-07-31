@@ -117,7 +117,8 @@ body > * {
 }
 
 .app-bottom-pad {
-  padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 1rem);
+  /* Extra space so last-card actions aren't covered by the fixed bottom nav */
+  padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 2.5rem);
 }
 
 @media (prefers-reduced-motion: reduce) {
