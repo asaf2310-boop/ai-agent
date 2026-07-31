@@ -6,6 +6,7 @@ import {
   wasSentToRealEmployer,
 } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
@@ -69,6 +70,7 @@ export async function GET(request: Request) {
     const opened = applications.filter(
       (a) => wasLinkOpened(a) && !wasSentToRealEmployer(a),
     ).length;
+    const dailyQuota = await getDailyAutoApplyUsage(supabase, user.id);
     const summary = {
       total: applications.length,
       sent,
@@ -77,9 +79,12 @@ export async function GET(request: Request) {
       prepared: 0,
       skipped: 0,
       failed: 0,
+      dailyAutoUsed: dailyQuota.used,
+      dailyAutoQuota: dailyQuota.quota,
+      dailyAutoRemaining: dailyQuota.remaining,
     };
 
-    return NextResponse.json({ applications, summary });
+    return NextResponse.json({ applications, summary, dailyQuota });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to load applications";
