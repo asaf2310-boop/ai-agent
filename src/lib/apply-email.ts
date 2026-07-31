@@ -228,6 +228,9 @@ export function isJunkApplicationRow(app: {
   method?: string | null;
   jobs?: { apply_email?: string | null } | null;
 }): boolean {
+  // Explicit «לא מעוניין» / הסר מהפול — keep forever (must not be auto-purged)
+  if (wasLinkOpened(app)) return false;
+
   if (app.status === "failed" || app.status === "prepared" || app.status === "skipped") {
     return true;
   }

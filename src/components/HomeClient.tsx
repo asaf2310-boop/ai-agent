@@ -148,7 +148,8 @@ export function HomeClient({ email }: { email?: string | null }) {
         const company = (dismissed?.jobs?.company || "").trim().toLowerCase();
         const title = (dismissed?.jobs?.title || "").trim().toLowerCase();
 
-        // Immediate UX: hide this job + same company / near-duplicate titles
+        // Remove immediately (don't wait for reload — reload used to re-add
+        // the job because dismiss rows were auto-purged as "junk").
         setMatches((prev) =>
           prev.filter((m) => {
             if (m.job_id === jobId || m.jobs?.id === jobId) return false;
@@ -158,6 +159,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             if (
               title &&
               t &&
+              title.length >= 8 &&
               (t === title || t.includes(title) || title.includes(t))
             ) {
               return false;
@@ -165,14 +167,22 @@ export function HomeClient({ email }: { email?: string | null }) {
             return true;
           }),
         );
-        await Promise.all([
-          loadMatches(resume?.id, { quiet: true }),
-          loadApplications(resume?.id, { quiet: true }),
-        ]);
+        if (json.application) {
+          setApplications((prev) => {
+            const rest = prev.filter(
+              (a) =>
+                a.job_id !== jobId && a.id !== json.application?.id,
+            );
+            return [json.application, ...rest];
+          });
+        }
         setMessage(
           json.detail ||
             "הוסר ✓ — לא יוצג שוב; המערכת תלמד לא להציע משרות דומות",
         );
+        // Refresh in background after local removal
+        void loadApplications(resume?.id, { quiet: true });
+        void loadMatches(resume?.id, { quiet: true });
       } catch (err) {
         setMessage(err instanceof Error ? err.message : "הסרה נכשלה");
       } finally {
