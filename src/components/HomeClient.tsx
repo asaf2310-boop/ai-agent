@@ -9,6 +9,7 @@ import type { Application, JobMatch, Resume } from "@/lib/types";
 type Summary = {
   total: number;
   sent: number;
+  notSent: number;
   prepared: number;
   skipped: number;
   failed: number;
@@ -99,7 +100,7 @@ export function HomeClient() {
       await loadApplications(next.id);
     }
     setMessage(
-      "הקו״ח נשמר. בוצעו התאמה ושכתוב — התוצאות מופיעות למטה במערכת (בלי מייל).",
+      "הקו״ח נשמר. בוצעו התאמה ושליחה אוטומטית למשרות עם מייל — ראה דוח נשלח / לא נשלח.",
     );
   }
 
@@ -119,7 +120,7 @@ export function HomeClient() {
       setApplications(json.applications ?? []);
       await loadApplications(json.resume?.id || resume?.id);
       setMessage(
-        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות, ${json.applicationsCount ?? 0} רשומות בדוח במערכת.`,
+        `סריקה הושלמה: ${json.matchesCount ?? 0} התאמות · נשלח: ${json.sentCount ?? 0} · לא נשלח: ${json.notSentCount ?? 0}`,
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שגיאה בהרצת הסריקה");
@@ -139,8 +140,8 @@ export function HomeClient() {
         </h1>
         <p className="max-w-xl text-base text-[var(--muted)]">
           קו״ח נשמר בחשבון. סריקה בישראל — AI, פיננסים, מוצר, ניהול ועוד — כולל
-          פוסטים בסגנון LinkedIn. התוצאות והקו״ח המותאם מופיעים במערכת (בלי מייל
-          התראה). סריקה אוטומטית פעמיים ביום.
+          LinkedIn. שליחה אוטומטית למשרות עם מייל הגשה; השאר מופיעים תחת ״לא
+          נשלח״ עם קו״ח מותאם. סריקה פעמיים ביום.
         </p>
       </header>
 
@@ -179,7 +180,7 @@ export function HomeClient() {
               disabled={pipelineBusy || !resume}
               className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
             >
-              {pipelineBusy ? "רץ…" : "הפעל סריקה"}
+              {pipelineBusy ? "רץ…" : "הפעל סריקה + שליחה"}
             </button>
             <button
               type="button"
@@ -198,7 +199,7 @@ export function HomeClient() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">3. דוח שליחות</h2>
+        <h2 className="text-xl font-semibold">3. דוח שליחות — נשלח / לא נשלח</h2>
         <ApplicationReport
           applications={applications}
           loading={loadingApps}

@@ -354,10 +354,17 @@ def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str
 
 
 def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
-    """Save tailored CVs in-app. No notify emails by default."""
-    enable_employer = os.getenv("ENABLE_EMPLOYER_EMAIL", "").lower() in ("1", "true", "yes")
+    """Auto-email employers when apply_email exists; otherwise mark not-sent in-app."""
+    enable_employer = os.getenv("ENABLE_EMPLOYER_EMAIL", "true").lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+    reply_to = os.getenv("CANDIDATE_EMAIL") or os.getenv("APPLICATION_CANDIDATE_EMAIL")
     max_apps = min(int(os.getenv("MAX_APPLICATIONS_PER_RUN", "40")), 60)
     ranked = sorted(matches, key=lambda m: float(m.get("score") or 0), reverse=True)
+    email_re = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
     written = 0
     for match in ranked[:max_apps]:
         job = match.get("jobs") or {}
@@ -365,38 +372,55 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         resume_text = resume.get("extracted_text") or " ".join(resume.get("skills") or [])
         insights, tailored, _ = openai_tailor(resume_text, job)
 
-        apply_email = job.get("apply_email")
+        apply_email = (job.get("apply_email") or "").strip().lower() or None
+        if not apply_email:
+            found = email_re.findall(job.get("description") or "")
+            apply_email = found[0].lower() if found else None
+
         is_social = bool(job.get("is_social")) or str(job.get("source", "")).startswith("social")
         status = "prepared"
         method = "in-app"
-        skip_reason = (
-            "נשמר במערכת — פתח את הקישור והגש ידנית"
-            if is_social
-            else "נשמר במערכת — קו״ח מותאם זמין בדוח"
-        )
+        skip_reason = None
         error = None
 
-        if enable_employer and apply_email:
-            body = (
-                f"מועמדות: {job.get('title')}\n"
-                f"חברה: {job.get('company')}\nקישור: {job.get('url')}\n\n"
-                f"סיכום התאמה:\n{insights}\n\nקו״ח מותאם:\n{tailored}"
+        if not enable_employer:
+            status = "skipped"
+            method = "disabled"
+            skip_reason = "שליחה אוטומטית כבויה (ENABLE_EMPLOYER_EMAIL=false)"
+        elif not apply_email:
+            status = "skipped"
+            method = "link-only" if is_social else "no-email"
+            skip_reason = (
+                "לא נשלח — פוסט ברשת. הגשה ידנית דרך הקישור"
+                if is_social
+                else "לא נשלח — אין מייל הגשה. קו״ח מותאם מוכן להגשה ידנית"
             )
-            subject = f"AI Agent · מועמדות · {job.get('title')}"
+        else:
+            body = (
+                f"שלום,\n\n"
+                f"מצורפת מועמדות למשרה: {job.get('title')}\n"
+                f"חברה: {job.get('company')}\n"
+                f"קישור: {job.get('url')}\n\n"
+                f"סיכום התאמה:\n{insights}\n\n"
+                f"קו״ח מותאם:\n{tailored}\n"
+            )
+            if reply_to:
+                body += f"\nליצירת קשר: {reply_to}\n"
+            subject = f"מועמדות: {job.get('title')}"
             ok, err, method_name = send_resend_email(apply_email, subject, body)
             if ok:
                 status = "sent"
                 method = "job-email"
                 skip_reason = None
             elif err and "RESEND_API_KEY" in err:
-                status = "prepared"
-                method = "in-app"
-                skip_reason = "נשמר במערכת (חסר RESEND_API_KEY לשליחה למעסיק)"
+                status = "skipped"
+                method = "no-resend"
+                skip_reason = "לא נשלח — חסר RESEND_API_KEY"
             else:
                 status = "failed"
                 method = method_name
                 error = err
-                skip_reason = None
+                skip_reason = "לא נשלח — שגיאה בשליחה למעסיק"
 
         client.table("applications").upsert(
             {

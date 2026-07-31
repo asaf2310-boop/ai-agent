@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { wasSentToEmployer } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -27,7 +28,14 @@ export async function GET(request: Request) {
       if (/user_id/i.test(error.message)) {
         return NextResponse.json({
           applications: [],
-          summary: { total: 0, sent: 0, prepared: 0, skipped: 0, failed: 0 },
+          summary: {
+            total: 0,
+            sent: 0,
+            notSent: 0,
+            prepared: 0,
+            skipped: 0,
+            failed: 0,
+          },
           warning: "Run SQL migration 004_security_rls_auth.sql",
         });
       }
@@ -35,9 +43,11 @@ export async function GET(request: Request) {
     }
 
     const applications = data ?? [];
+    const sent = applications.filter((a) => wasSentToEmployer(a)).length;
     const summary = {
       total: applications.length,
-      sent: applications.filter((a) => a.status === "sent").length,
+      sent,
+      notSent: applications.length - sent,
       prepared: applications.filter((a) => a.status === "prepared").length,
       skipped: applications.filter((a) => a.status === "skipped").length,
       failed: applications.filter((a) => a.status === "failed").length,

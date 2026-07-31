@@ -31,6 +31,7 @@ const base = (
   opts?: Partial<CatalogJob>,
 ): CatalogJob => {
   const source = opts?.source || "alljobs";
+  const isSocial = Boolean(opts?.is_social);
   return {
     source,
     external_id: id,
@@ -39,14 +40,14 @@ const base = (
     location,
     url:
       opts?.url ||
-      (opts?.is_social
+      (isSocial
         ? `https://www.linkedin.com/jobs/view/${id}`
         : boardUrl(source.includes("social") ? "linkedin" : source, id)),
     description,
-    apply_email: null,
+    apply_email: opts?.apply_email ?? null,
     post_kind: opts?.post_kind || "job",
     channel: opts?.channel || null,
-    is_social: opts?.is_social || false,
+    is_social: isSocial,
     domain,
   };
 };

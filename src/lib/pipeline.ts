@@ -1,7 +1,8 @@
+import { extractEmails, resolveApplyEmail } from "@/lib/apply-email";
 import { isIsraelLocation } from "@/lib/israel";
+import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
-import { ISRAEL_JOB_CATALOG } from "@/lib/israel-jobs-catalog";
 import type { Job, JobMatch, Resume } from "@/lib/types";
 
 // Admin client may use custom schema (job_agent); keep typing loose.
@@ -90,7 +91,7 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
           location: location || "Israel",
           url: (item.url as string) || `https://remoteok.com/remote-jobs/${item.id}`,
           description: description.slice(0, 4000),
-          apply_email: null,
+          apply_email: extractEmails(description)[0] || null,
           post_kind: freelance ? "freelance" : "job",
           channel: "remoteok",
           is_social: true,
@@ -129,7 +130,7 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
           location: location || "Israel",
           url,
           description: description.slice(0, 4000),
-          apply_email: null,
+          apply_email: extractEmails(description)[0] || null,
           post_kind: /freelance|contract/i.test(`${item.job_type} ${description}`)
             ? "freelance"
             : "job",
@@ -227,6 +228,7 @@ async function sendApplicationEmail(input: {
   to: string;
   subject: string;
   body: string;
+  replyTo?: string | null;
 }): Promise<{ ok: boolean; error?: string; method: string }> {
   const resendKey = process.env.RESEND_API_KEY;
   const from = process.env.APPLICATION_FROM_EMAIL || "onboarding@resend.dev";
@@ -235,18 +237,21 @@ async function sendApplicationEmail(input: {
     return { ok: false, error: "RESEND_API_KEY not configured", method: "none" };
   }
 
+  const payload: Record<string, unknown> = {
+    from,
+    to: [input.to],
+    subject: input.subject,
+    text: input.body,
+  };
+  if (input.replyTo) payload.reply_to = input.replyTo;
+
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${resendKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      from,
-      to: [input.to],
-      subject: input.subject,
-      text: input.body,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -258,9 +263,9 @@ async function sendApplicationEmail(input: {
 }
 
 /**
- * Prepare tailored CVs in the app report.
- * By default does NOT email anyone — results appear in the UI only.
- * Optional: ENABLE_EMPLOYER_EMAIL=true + job.apply_email to email recruiters.
+ * Auto-apply by email when a recruiter address exists.
+ * Otherwise prepare tailored CV in-app and mark as not sent.
+ * Does not send alert emails to APPLICATION_NOTIFY_EMAIL.
  */
 export async function processApplicationsForResume(
   supabase: DbClient,
@@ -271,9 +276,14 @@ export async function processApplicationsForResume(
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || "";
   const ownerId = userId || resume.user_id;
-  const enableEmployerEmail =
-    process.env.ENABLE_EMPLOYER_EMAIL === "true" ||
-    process.env.ENABLE_EMPLOYER_EMAIL === "1";
+  // Auto-send ON by default; set ENABLE_EMPLOYER_EMAIL=false to disable
+  const enableEmployerEmail = !["false", "0", "no", "off"].includes(
+    (process.env.ENABLE_EMPLOYER_EMAIL || "true").toLowerCase(),
+  );
+  const replyTo =
+    process.env.CANDIDATE_EMAIL ||
+    process.env.APPLICATION_CANDIDATE_EMAIL ||
+    null;
   const maxApps = Math.min(
     Number(process.env.MAX_APPLICATIONS_PER_RUN || "40"),
     60,
@@ -296,33 +306,47 @@ export async function processApplicationsForResume(
 
     const insights = asPlainText(tailored.insights);
     const tailoredCv = asPlainText(tailored.tailoredCv);
-    const applyEmail = job.apply_email || null;
     const isSocial = Boolean(job.is_social) || job.source.startsWith("social");
+    const applyEmail = resolveApplyEmail(job);
 
     let status: "sent" | "prepared" | "skipped" | "failed" = "prepared";
     let method: string | null = "in-app";
-    let skipReason: string | null = isSocial
-      ? "נשמר במערכת — פתח את הקישור והגש ידנית"
-      : "נשמר במערכת — קו״ח מותאם זמין בדוח";
+    let skipReason: string | null = null;
     let error: string | null = null;
 
-    // Optional: only email the employer when explicitly enabled and apply_email exists
-    if (enableEmployerEmail && applyEmail) {
+    if (!enableEmployerEmail) {
+      status = "skipped";
+      method = "disabled";
+      skipReason = "שליחה אוטומטית כבויה (ENABLE_EMPLOYER_EMAIL=false)";
+    } else if (!applyEmail) {
+      status = "skipped";
+      method = isSocial ? "link-only" : "no-email";
+      skipReason = isSocial
+        ? "לא נשלח — פוסט ברשת (LinkedIn וכו׳). הגשה ידנית דרך הקישור"
+        : "לא נשלח — אין מייל הגשה למשרה. קו״ח מותאם מוכן; הגש ידנית בקישור";
+    } else {
       const emailBody = [
-        `מועמדות למשרה: ${job.title}`,
+        `שלום,`,
+        ``,
+        `מצורפת מועמדות למשרה: ${job.title}`,
         `חברה: ${job.company || "—"}`,
-        `קישור: ${job.url || "—"}`,
-        "",
-        "סיכום התאמה:",
+        `קישור למשרה: ${job.url || "—"}`,
+        ``,
+        `סיכום התאמה קצר:`,
         insights,
-        "",
-        "קו״ח מותאם:",
+        ``,
+        `קו״ח מותאם:`,
         tailoredCv,
-      ].join("\n");
+        ``,
+        replyTo ? `ליצירת קשר עם המועמד/ת: ${replyTo}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const sent = await sendApplicationEmail({
         to: applyEmail,
-        subject: `AI Agent · מועמדות · ${job.title}${job.company ? ` @ ${job.company}` : ""}`,
+        replyTo,
+        subject: `מועמדות: ${job.title}${job.company ? ` — ${job.company}` : ""}`,
         body: emailBody,
       });
 
@@ -331,14 +355,15 @@ export async function processApplicationsForResume(
         method = "job-email";
         skipReason = null;
       } else if (sent.error?.includes("RESEND_API_KEY")) {
-        status = "prepared";
-        method = "in-app";
-        skipReason = "נשמר במערכת (שליחה למעסיק כבויה — חסר RESEND_API_KEY)";
+        status = "skipped";
+        method = "no-resend";
+        skipReason =
+          "לא נשלח — חסר RESEND_API_KEY. הקו״ח הותאם ונשמר להגשה ידנית";
       } else {
         status = "failed";
-        error = sent.error || "send failed";
-        method = sent.method;
-        skipReason = null;
+        method = "job-email";
+        error = sent.error || "שליחה למעסיק נכשלה";
+        skipReason = "לא נשלח — שגיאה בשליחת המייל למעסיק";
       }
     }
 
