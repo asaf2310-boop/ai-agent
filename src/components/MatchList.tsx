@@ -5,6 +5,7 @@ import type { JobMatch } from "@/lib/types";
 type Props = {
   matches: JobMatch[];
   loading: boolean;
+  onOpenJobLink?: (jobId: string, matchId: string) => void;
 };
 
 function scoreLabel(score: number) {
@@ -20,7 +21,7 @@ function kindLabel(job: JobMatch["jobs"]) {
   return null;
 }
 
-export function MatchList({ matches, loading }: Props) {
+export function MatchList({ matches, loading, onOpenJobLink }: Props) {
   if (loading) {
     return <p className="text-sm text-[var(--muted)]">טוען התאמות…</p>;
   }
@@ -28,8 +29,8 @@ export function MatchList({ matches, loading }: Props) {
   if (matches.length === 0) {
     return (
       <p className="text-sm text-[var(--muted)]">
-        עדיין אין משרות בפול. לחץ ״הפעל סריקה + שליחה״. משרות שנשלחו עוברות
-        להיסטוריית שליחות (סעיף 3) ויורדות מהפול.
+        עדיין אין משרות בפול. לחץ ״הפעל סריקה + שליחה״. משרות שנשלחו או שנפתח
+        הקישור שלהן עוברות להיסטוריה ויורדות מהפול.
       </p>
     );
   }
@@ -39,6 +40,9 @@ export function MatchList({ matches, loading }: Props) {
       {matches.map((match) => {
         const job = match.jobs;
         const badge = kindLabel(job);
+        const markOpened = () => {
+          if (job?.id) onOpenJobLink?.(job.id, match.id);
+        };
         return (
           <li key={match.id} className="py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -49,6 +53,7 @@ export function MatchList({ matches, loading }: Props) {
                     target="_blank"
                     rel="noreferrer"
                     className="hover:text-[var(--accent)]"
+                    onClick={markOpened}
                   >
                     {job.title}
                   </a>
@@ -70,15 +75,16 @@ export function MatchList({ matches, loading }: Props) {
                 {match.reasons.join(" · ")}
               </p>
             )}
-            {job?.url && (job.is_social || job.post_kind === "freelance") && (
+            {job?.url && (
               <p className="mt-2">
                 <a
                   href={job.url}
                   target="_blank"
                   rel="noreferrer"
                   className="text-sm font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                  onClick={markOpened}
                 >
-                  פתח פוסט / קישור להגשה ↗
+                  פתח קישור / הגשה ידנית ↗
                 </a>
               </p>
             )}

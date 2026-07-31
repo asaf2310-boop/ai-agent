@@ -53,6 +53,19 @@ export function wasSentToEmployer(app: {
   return app.status === "sent" && app.method === "job-email";
 }
 
+/** User opened the job link — treat as handled for the pool. */
+export function wasLinkOpened(app: { method?: string | null }): boolean {
+  return app.method === "link-opened";
+}
+
+/** Sent or link-opened → leave active pool, stay in history only. */
+export function isClearedFromPool(app: {
+  status: string;
+  method?: string | null;
+}): boolean {
+  return wasSentToEmployer(app) || wasLinkOpened(app);
+}
+
 export function explainResendFailure(error: string | null | undefined): string {
   const e = error || "";
   if (/RESEND_API_KEY/i.test(e)) {

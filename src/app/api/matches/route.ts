@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { wasSentToEmployer } from "@/lib/apply-email";
+import { isClearedFromPool } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-/** Active pool: matches that were NOT yet sent to an employer. */
+/** Active pool: matches not yet sent and not yet opened via link. */
 export async function GET(request: Request) {
   try {
     const { user, response } = await requireUser();
@@ -65,20 +65,18 @@ export async function GET(request: Request) {
 
     const matches = data ?? [];
 
-    // Remove jobs already sent to employer from the active pool
-    let sentJobIds = new Set<string>();
+    // Remove sent + link-opened jobs from the active pool
+    let clearedJobIds = new Set<string>();
     try {
       let appsQuery = supabase
         .from("applications")
         .select("job_id, status, method")
-        .eq("user_id", user.id)
-        .eq("status", "sent")
-        .eq("method", "job-email");
+        .eq("user_id", user.id);
       if (resumeId) appsQuery = appsQuery.eq("resume_id", resumeId);
-      const { data: sentApps } = await appsQuery.limit(200);
-      sentJobIds = new Set(
-        (sentApps || [])
-          .filter((a) => wasSentToEmployer(a))
+      const { data: apps } = await appsQuery.limit(300);
+      clearedJobIds = new Set(
+        (apps || [])
+          .filter((a) => isClearedFromPool(a))
           .map((a) => a.job_id)
           .filter(Boolean),
       );
@@ -86,12 +84,12 @@ export async function GET(request: Request) {
       // if applications query fails, return unfiltered matches
     }
 
-    const pool = matches.filter((m) => !sentJobIds.has(m.job_id));
+    const pool = matches.filter((m) => !clearedJobIds.has(m.job_id));
 
     return NextResponse.json({
       matches: pool,
       poolCount: pool.length,
-      hiddenSentCount: matches.length - pool.length,
+      hiddenClearedCount: matches.length - pool.length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load matches";

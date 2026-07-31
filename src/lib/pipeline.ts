@@ -2,6 +2,7 @@ import {
   explainResendFailure,
   extractEmails,
   fetchApplyEmailFromUrl,
+  isClearedFromPool,
   resolveApplyEmail,
   wasSentToEmployer,
 } from "@/lib/apply-email";
@@ -11,7 +12,7 @@ import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
 
-export { wasSentToEmployer };
+export { wasSentToEmployer, isClearedFromPool };
 
 // Admin client may use custom schema (job_agent); keep typing loose.
 type DbClient = {
@@ -305,6 +306,25 @@ export async function processApplicationsForResume(
   for (const match of sorted.slice(0, maxApps)) {
     const job = match.jobs;
     if (!job) continue;
+
+    // Don't overwrite history entries (employer-sent or user opened the link)
+    try {
+      let existingQuery = supabase
+        .from("applications")
+        .select("*, jobs(*)")
+        .eq("resume_id", resume.id)
+        .eq("job_id", job.id)
+        .limit(1);
+      if (ownerId) existingQuery = existingQuery.eq("user_id", ownerId);
+      const { data: existingRows } = await existingQuery;
+      const existing = existingRows?.[0];
+      if (existing && isClearedFromPool(existing)) {
+        results.push(existing);
+        continue;
+      }
+    } catch {
+      // continue with normal processing
+    }
 
     const tailored = await tailorResumeForJob({
       resumeText,

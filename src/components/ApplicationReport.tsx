@@ -1,6 +1,9 @@
 "use client";
 
-import { wasSentToEmployer } from "@/lib/apply-email";
+import {
+  wasLinkOpened,
+  wasSentToEmployer,
+} from "@/lib/apply-email";
 import type { Application } from "@/lib/types";
 
 type Props = {
@@ -10,15 +13,30 @@ type Props = {
     total: number;
     sent: number;
     notSent?: number;
+    opened?: number;
     prepared: number;
     skipped: number;
     failed: number;
   };
+  onOpenJobLink?: (jobId: string) => void;
 };
 
-function ApplicationCard({ app }: { app: Application }) {
+function statusLabel(app: Application): string {
+  if (wasSentToEmployer(app)) return "נשלח";
+  if (wasLinkOpened(app)) return "נפתח";
+  return "לא נשלח";
+}
+
+function ApplicationCard({
+  app,
+  onOpenJobLink,
+}: {
+  app: Application;
+  onOpenJobLink?: (jobId: string) => void;
+}) {
   const job = app.jobs;
   const sent = wasSentToEmployer(app);
+  const opened = wasLinkOpened(app);
 
   return (
     <li className="space-y-2 py-4">
@@ -30,6 +48,9 @@ function ApplicationCard({ app }: { app: Application }) {
               target="_blank"
               rel="noreferrer"
               className="hover:text-[var(--accent)]"
+              onClick={() => {
+                if (job.id) onOpenJobLink?.(job.id);
+              }}
             >
               {job.title}
               {job.company ? ` · ${job.company}` : ""}
@@ -43,10 +64,10 @@ function ApplicationCard({ app }: { app: Application }) {
         </h3>
         <span
           className={`text-sm font-medium ${
-            sent ? "text-[var(--accent)]" : "text-[var(--muted)]"
+            sent || opened ? "text-[var(--accent)]" : "text-[var(--muted)]"
           }`}
         >
-          {sent ? "נשלח" : "לא נשלח"}
+          {statusLabel(app)}
         </span>
       </div>
       {job?.location && (
@@ -69,6 +90,9 @@ function ApplicationCard({ app }: { app: Application }) {
             target="_blank"
             rel="noreferrer"
             className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+            onClick={() => {
+              if (job.id) onOpenJobLink?.(job.id);
+            }}
           >
             קישור למשרה / הגשה ידנית ↗
           </a>
@@ -92,53 +116,87 @@ function ApplicationCard({ app }: { app: Application }) {
   );
 }
 
-export function ApplicationReport({ applications, loading, summary }: Props) {
+export function ApplicationReport({
+  applications,
+  loading,
+  summary,
+  onOpenJobLink,
+}: Props) {
   if (loading) {
     return <p className="text-sm text-[var(--muted)]">טוען דוח…</p>;
   }
 
   const sentApps = applications.filter((a) => wasSentToEmployer(a));
-  const notSentApps = applications.filter((a) => !wasSentToEmployer(a));
+  const openedApps = applications.filter(
+    (a) => wasLinkOpened(a) && !wasSentToEmployer(a),
+  );
+  const pendingApps = applications.filter(
+    (a) => !wasSentToEmployer(a) && !wasLinkOpened(a),
+  );
   const sentCount = summary?.sent ?? sentApps.length;
-  const notSentCount = summary?.notSent ?? notSentApps.length;
+  const openedCount = summary?.opened ?? openedApps.length;
 
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap gap-3 text-sm text-[var(--muted)]">
         <span>סה״כ: {summary?.total ?? applications.length}</span>
         <span className="font-medium text-[var(--accent)]">
-          נשלח למעסיק: {sentCount}
+          נשלח: {sentCount}
         </span>
-        <span className="font-medium">לא נשלח: {notSentCount}</span>
-        {(summary?.failed ?? 0) > 0 && (
-          <span className="text-red-700">כשל בשליחה: {summary!.failed}</span>
-        )}
+        <span className="font-medium text-[var(--accent)]">
+          נפתח: {openedCount}
+        </span>
+        <span className="font-medium">ממתין: {pendingApps.length}</span>
       </div>
 
       {applications.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין רשומות. לחץ ״הפעל סריקה + שליחה״ — המערכת תנסה לשלוח למשרות
-          עם מייל הגשה, והשאר יופיעו תחת ״לא נשלח״ עם קו״ח מותאם.
+          עדיין אין רשומות. לחץ ״הפעל סריקה + שליחה״, או פתח קישור למשרה מהפול —
+          והיא תעבור לכאן להיסטוריה.
         </p>
       ) : (
         <>
           <section className="space-y-2">
             <h3 className="text-lg font-semibold text-[var(--accent)]">
-              היסטוריית שליחות — נשלח למעסיק ({sentApps.length})
+              היסטוריה — נשלח למעסיק ({sentApps.length})
             </h3>
             <p className="text-sm text-[var(--muted)]">
-              משרות שנשלחו יורדות מהפול (סעיף 2) ומופיעות כאן בלבד.
+              ירדו מהפול ולא יחזרו אחרי סריקה.
             </p>
             {sentApps.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">
-                עדיין אין שליחות. צריך מייל הגשה במשרה + Resend עם דומיין מאומת
-                (לא רק onboarding@resend.dev). פוסטים מלינקדאין/טלגרם נשארים ב״לא
-                נשלח״ להגשה ידנית.
-              </p>
+              <p className="text-sm text-[var(--muted)]">עדיין אין שליחות מייל.</p>
             ) : (
               <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
                 {sentApps.map((app) => (
-                  <ApplicationCard key={app.id} app={app} />
+                  <ApplicationCard
+                    key={app.id}
+                    app={app}
+                    onOpenJobLink={onOpenJobLink}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-lg font-semibold text-[var(--accent)]">
+              היסטוריה — נפתח קישור ({openedApps.length})
+            </h3>
+            <p className="text-sm text-[var(--muted)]">
+              משרות שנכנסת לקישור שלהן — ירדו מהפול ולא יחזרו.
+            </p>
+            {openedApps.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">
+                עדיין לא נפתח אף קישור מהפול.
+              </p>
+            ) : (
+              <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+                {openedApps.map((app) => (
+                  <ApplicationCard
+                    key={app.id}
+                    app={app}
+                    onOpenJobLink={onOpenJobLink}
+                  />
                 ))}
               </ul>
             )}
@@ -146,18 +204,21 @@ export function ApplicationReport({ applications, loading, summary }: Props) {
 
           <section className="space-y-2">
             <h3 className="text-lg font-semibold">
-              לא נשלח — ממתינות ({notSentApps.length})
+              ממתינות ({pendingApps.length})
             </h3>
             <p className="text-sm text-[var(--muted)]">
-              בלי מייל מעסיק, פוסט ברשת, או כשל Resend — הקו״ח המותאם מוכן להגשה
-              ידנית. אלה עדיין יכולות להופיע בפול עד שיישלחו.
+              עדיין בפול / לא נפתחו ולא נשלחו — קו״ח מותאם מוכן.
             </p>
-            {notSentApps.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">הכל נשלח.</p>
+            {pendingApps.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">אין ממתינות.</p>
             ) : (
               <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-                {notSentApps.map((app) => (
-                  <ApplicationCard key={app.id} app={app} />
+                {pendingApps.map((app) => (
+                  <ApplicationCard
+                    key={app.id}
+                    app={app}
+                    onOpenJobLink={onOpenJobLink}
+                  />
                 ))}
               </ul>
             )}

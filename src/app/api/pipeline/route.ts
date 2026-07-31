@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { wasSentToEmployer } from "@/lib/apply-email";
+import { wasSentToEmployer, isClearedFromPool } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -80,11 +80,25 @@ export async function POST(request: Request) {
 
     const appRows = applications as Application[];
     const sentCount = appRows.filter((a) => wasSentToEmployer(a)).length;
-    const sentJobIds = new Set(
-      appRows.filter((a) => wasSentToEmployer(a)).map((a) => a.job_id),
+
+    // Also exclude previously cleared jobs (sent / link-opened) from pool
+    const { data: allApps } = await supabase
+      .from("applications")
+      .select("job_id, status, method")
+      .eq("user_id", user.id)
+      .eq("resume_id", resume.id)
+      .limit(300);
+    const clearedJobIds = new Set(
+      (allApps || [])
+        .filter((a) => isClearedFromPool(a))
+        .map((a) => a.job_id)
+        .filter(Boolean),
     );
-    // Active pool excludes already-sent jobs (they live in send history only)
-    const poolMatches = matches.filter((m) => !sentJobIds.has(m.job_id));
+    for (const a of appRows) {
+      if (isClearedFromPool(a)) clearedJobIds.add(a.job_id);
+    }
+
+    const poolMatches = matches.filter((m) => !clearedJobIds.has(m.job_id));
 
     return NextResponse.json({
       resume,
@@ -92,6 +106,7 @@ export async function POST(request: Request) {
       applicationsCount: applications.length,
       sentCount,
       notSentCount: applications.length - sentCount,
+      openedCount: (allApps || []).filter((a) => a.method === "link-opened").length,
       matches: poolMatches,
       applications,
     });

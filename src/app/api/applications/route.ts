@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { wasSentToEmployer } from "@/lib/apply-email";
+import { wasLinkOpened, wasSentToEmployer } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -31,6 +31,7 @@ export async function GET(request: Request) {
           summary: {
             total: 0,
             sent: 0,
+            opened: 0,
             notSent: 0,
             prepared: 0,
             skipped: 0,
@@ -44,9 +45,13 @@ export async function GET(request: Request) {
 
     const applications = data ?? [];
     const sent = applications.filter((a) => wasSentToEmployer(a)).length;
+    const opened = applications.filter(
+      (a) => wasLinkOpened(a) && !wasSentToEmployer(a),
+    ).length;
     const summary = {
       total: applications.length,
       sent,
+      opened,
       notSent: applications.length - sent,
       prepared: applications.filter((a) => a.status === "prepared").length,
       skipped: applications.filter((a) => a.status === "skipped").length,

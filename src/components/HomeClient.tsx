@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ApplicationReport } from "@/components/ApplicationReport";
+import { AutofillKit } from "@/components/AutofillKit";
 import { MatchList } from "@/components/MatchList";
 import { ResumeUpload } from "@/components/ResumeUpload";
 import type { Application, JobMatch, Resume } from "@/lib/types";
@@ -9,6 +10,7 @@ import type { Application, JobMatch, Resume } from "@/lib/types";
 type Summary = {
   total: number;
   sent: number;
+  opened?: number;
   notSent: number;
   prepared: number;
   skipped: number;
@@ -25,6 +27,13 @@ export function HomeClient() {
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [autofillJob, setAutofillJob] = useState<{
+    jobId: string;
+    title?: string | null;
+    company?: string | null;
+    url?: string | null;
+    tailoredCvText?: string | null;
+  } | null>(null);
 
   const loadMatches = useCallback(async (resumeId?: string) => {
     setLoadingMatches(true);
@@ -86,6 +95,45 @@ export function HomeClient() {
     void loadSavedResume();
   }, [loadSavedResume]);
 
+  const markJobOpened = useCallback(
+    async (jobId: string, matchId?: string) => {
+      try {
+        const res = await fetch("/api/applications/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobId,
+            matchId,
+            resumeId: resume?.id,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "סימון נכשל");
+
+        const job = json.application?.jobs;
+        const fromMatch = matches.find((m) => m.job_id === jobId || m.jobs?.id === jobId);
+        setAutofillJob({
+          jobId,
+          title: job?.title || fromMatch?.jobs?.title,
+          company: job?.company || fromMatch?.jobs?.company,
+          url: job?.url || fromMatch?.jobs?.url,
+          tailoredCvText:
+            json.application?.tailored_cv_text ||
+            applications.find((a) => a.job_id === jobId)?.tailored_cv_text,
+        });
+
+        await Promise.all([
+          loadMatches(resume?.id),
+          loadApplications(resume?.id),
+        ]);
+        setMessage("המשרה סומנה כנפתחה — ירדה מהפול להיסטוריה. מלא טופס עם הערכה למטה.");
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "סימון קישור נכשל");
+      }
+    },
+    [resume?.id, matches, applications, loadMatches, loadApplications],
+  );
+
   async function handleUploaded(
     next: Resume,
     meta?: { matches?: JobMatch[]; applications?: Application[] },
@@ -96,7 +144,7 @@ export function HomeClient() {
     }
     await Promise.all([loadMatches(next.id), loadApplications(next.id)]);
     setMessage(
-      "הקו״ח נשמר. בוצעו התאמה ושליחה — משרות שנשלחו עוברות להיסטוריה ויורדות מהפול.",
+      "הקו״ח נשמר. בוצעו התאמה ושליחה — משרות שנשלחו/נפתחו עוברות להיסטוריה.",
     );
   }
 
@@ -113,13 +161,12 @@ export function HomeClient() {
       if (!res.ok) throw new Error(json.error || "הסריקה נכשלה");
       if (json.resume) setResume(json.resume as Resume);
       setApplications(json.applications ?? []);
-      // Reload pool from API so sent jobs are excluded from section 2
       await Promise.all([
         loadMatches(json.resume?.id || resume?.id),
         loadApplications(json.resume?.id || resume?.id),
       ]);
       setMessage(
-        `סריקה הושלמה: פול פעיל ${json.matchesCount ?? 0} · נשלח להיסטוריה: ${json.sentCount ?? 0} · לא נשלח: ${json.notSentCount ?? 0}`,
+        `סריקה הושלמה: פול ${json.matchesCount ?? 0} · נשלח: ${json.sentCount ?? 0} · נפתח: ${json.openedCount ?? 0}`,
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שגיאה בהרצת הסריקה");
@@ -138,9 +185,9 @@ export function HomeClient() {
           משרות בישראל שמתאימות לך
         </h1>
         <p className="max-w-xl text-base text-[var(--muted)]">
-          קו״ח נשמר בחשבון. סריקה בישראל + LinkedIn. שליחה אוטומטית כשיש מייל
-          הגשה (דורש Resend עם דומיין מאומת). משרה שנשלחה יורדת מהפול להיסטוריית
-          שליחות.
+          קו״ח נשמר בחשבון. סריקה, שליחה במייל כשאפשר, ומילוי פרטים אוטומטי
+          מתוך הקו״ח לטפסי הגשה באתרים — כולל הורדת קובץ לצירוף. משרה שנשלחה או
+          שנפתח הקישור שלה יורדת להיסטוריה.
         </p>
       </header>
 
@@ -171,7 +218,7 @@ export function HomeClient() {
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">2. פול התאמות (טרם נשלחו)</h2>
+          <h2 className="text-xl font-semibold">2. פול התאמות</h2>
           <div className="flex gap-2">
             <button
               type="button"
@@ -194,17 +241,50 @@ export function HomeClient() {
           </div>
         </div>
         {message && <p className="text-sm text-[var(--muted)]">{message}</p>}
-        <MatchList matches={matches} loading={loadingMatches} />
+        <MatchList
+          matches={matches}
+          loading={loadingMatches}
+          onOpenJobLink={(jobId, matchId) => {
+            void markJobOpened(jobId, matchId);
+          }}
+        />
       </section>
 
+      {autofillJob && resume && (
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">
+            מילוי טופס הגשה
+            {autofillJob.title ? ` — ${autofillJob.title}` : ""}
+          </h2>
+          <AutofillKit
+            resumeText={resume.extracted_text}
+            skills={resume.skills}
+            resumeId={resume.id}
+            jobTitle={autofillJob.title}
+            jobCompany={autofillJob.company}
+            jobUrl={autofillJob.url}
+            tailoredCvText={autofillJob.tailoredCvText}
+          />
+        </section>
+      )}
+
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">
-          3. היסטוריית שליחות — נשלח / לא נשלח
-        </h2>
+        <h2 className="text-xl font-semibold">3. היסטוריה — נשלח / נפתח</h2>
         <ApplicationReport
           applications={applications}
           loading={loadingApps}
           summary={summary}
+          onOpenJobLink={(jobId) => {
+            const app = applications.find((a) => a.job_id === jobId);
+            setAutofillJob({
+              jobId,
+              title: app?.jobs?.title,
+              company: app?.jobs?.company,
+              url: app?.jobs?.url,
+              tailoredCvText: app?.tailored_cv_text,
+            });
+            void markJobOpened(jobId, app?.match_id || undefined);
+          }}
         />
       </section>
     </div>
