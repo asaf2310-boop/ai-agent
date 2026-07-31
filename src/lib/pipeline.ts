@@ -3,6 +3,8 @@ import {
   extractEmails,
   fetchApplyEmailFromUrl,
   isClearedFromPool,
+  isValidResendTo,
+  normalizeApplyEmail,
   resolveApplyEmail,
   wasSentToEmployer,
 } from "@/lib/apply-email";
@@ -17,6 +19,10 @@ import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
 
 export { wasSentToEmployer, isClearedFromPool };
+
+function scrubNeedsPersist(raw: string, cleaned: string): boolean {
+  return raw.trim().toLowerCase() !== cleaned;
+}
 
 // Admin client may use custom schema (job_agent); keep typing loose.
 type DbClient = {
@@ -266,13 +272,28 @@ async function sendApplicationEmail(input: {
     return { ok: false, error: "RESEND_API_KEY not configured", method: "none" };
   }
 
+  const to = normalizeApplyEmail(input.to);
+  if (!to || !isValidResendTo(to)) {
+    return {
+      ok: false,
+      error: JSON.stringify({
+        statusCode: 422,
+        name: "validation_error",
+        message: `Invalid 'to' field locally: ${String(input.to).slice(0, 80)}`,
+      }),
+      method: "resend",
+    };
+  }
+
+  const replyTo = input.replyTo ? normalizeApplyEmail(input.replyTo) : null;
+
   const payload: Record<string, unknown> = {
     from,
-    to: [input.to],
+    to: [to],
     subject: input.subject,
     text: input.body,
   };
-  if (input.replyTo) payload.reply_to = input.replyTo;
+  if (replyTo) payload.reply_to = replyTo;
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -357,6 +378,20 @@ export async function processApplicationsForResume(
     const tailoredCv = asPlainText(tailored.tailoredCv);
     const isSocial = Boolean(job.is_social) || job.source.startsWith("social");
     let applyEmail = resolveApplyEmail(job);
+    if (
+      applyEmail &&
+      job.apply_email &&
+      scrubNeedsPersist(job.apply_email, applyEmail)
+    ) {
+      try {
+        await supabase
+          .from("jobs")
+          .update({ apply_email: applyEmail })
+          .eq("id", job.id);
+      } catch {
+        // best-effort cleanup of dirty apply_email values
+      }
+    }
     if (!applyEmail && !isSocial && urlFetchBudget > 0) {
       urlFetchBudget -= 1;
       applyEmail = await fetchApplyEmailFromUrl(job.url);

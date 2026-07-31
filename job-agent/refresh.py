@@ -332,8 +332,21 @@ def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
         return False, "RESEND_API_KEY not configured", "none"
+    clean_to = normalize_apply_email(to_email)
+    if not clean_to:
+        return (
+            False,
+            json.dumps(
+                {
+                    "statusCode": 422,
+                    "name": "validation_error",
+                    "message": f"Invalid 'to' field locally: {str(to_email)[:80]}",
+                }
+            ),
+            "resend",
+        )
     from_email = os.getenv("APPLICATION_FROM_EMAIL", "onboarding@resend.dev")
-    payload = {"from": from_email, "to": [to_email], "subject": subject, "text": body}
+    payload = {"from": from_email, "to": [clean_to], "subject": subject, "text": body}
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=json.dumps(payload).encode("utf-8"),
@@ -353,6 +366,42 @@ def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str
         return False, str(exc.reason), "resend"
 
 
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_INVISIBLE_RE = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]")
+_BLOCKED_DOMAINS = {
+    "example.com",
+    "example.org",
+    "example.net",
+    "test.com",
+    "email.com",
+    "domain.com",
+    "sentry.io",
+    "wixpress.com",
+}
+
+
+def normalize_apply_email(raw: str | None) -> str | None:
+    """Extract a bare address Resend will accept; drop mailto:/labels/RTL junk."""
+    if not raw:
+        return None
+    text = _INVISIBLE_RE.sub("", str(raw)).strip().lower()
+    if text.startswith("mailto:"):
+        text = text[7:]
+    found = _EMAIL_RE.findall(text)
+    for email in found:
+        domain = email.split("@")[-1]
+        if domain in _BLOCKED_DOMAINS:
+            continue
+        if email.endswith((".png", ".jpg", ".svg")):
+            continue
+        if ".." in email or email.startswith(".") or email.endswith("."):
+            continue
+        if " " in email or "," in email or "<" in email:
+            continue
+        return email
+    return None
+
+
 def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
     """Auto-email employers when apply_email exists; otherwise mark not-sent in-app."""
     enable_employer = os.getenv("ENABLE_EMPLOYER_EMAIL", "true").lower() not in (
@@ -361,10 +410,11 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         "no",
         "off",
     )
-    reply_to = os.getenv("CANDIDATE_EMAIL") or os.getenv("APPLICATION_CANDIDATE_EMAIL")
+    reply_to = normalize_apply_email(
+        os.getenv("CANDIDATE_EMAIL") or os.getenv("APPLICATION_CANDIDATE_EMAIL")
+    )
     max_apps = min(int(os.getenv("MAX_APPLICATIONS_PER_RUN", "40")), 60)
     ranked = sorted(matches, key=lambda m: float(m.get("score") or 0), reverse=True)
-    email_re = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
     written = 0
     for match in ranked[:max_apps]:
         job = match.get("jobs") or {}
@@ -372,10 +422,9 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         resume_text = resume.get("extracted_text") or " ".join(resume.get("skills") or [])
         insights, tailored, _ = openai_tailor(resume_text, job)
 
-        apply_email = (job.get("apply_email") or "").strip().lower() or None
+        apply_email = normalize_apply_email(job.get("apply_email"))
         if not apply_email:
-            found = email_re.findall(job.get("description") or "")
-            apply_email = found[0].lower() if found else None
+            apply_email = normalize_apply_email(job.get("description"))
 
         is_social = bool(job.get("is_social")) or str(job.get("source", "")).startswith("social")
         status = "prepared"
@@ -416,6 +465,11 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
                 status = "skipped"
                 method = "no-resend"
                 skip_reason = "לא נשלח — חסר RESEND_API_KEY"
+            elif err and ("Invalid 'to' field" in err or "validation_error" in err):
+                status = "failed"
+                method = method_name
+                error = err
+                skip_reason = "לא נשלח — כתובת המייל של המעסיק לא תקינה (פורמט Resend)"
             else:
                 status = "failed"
                 method = method_name
