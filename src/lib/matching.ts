@@ -144,7 +144,7 @@ export function tokenize(text: string): Set<string> {
   );
 }
 
-function detectJobFamilies(haystack: string): RoleFamily[] {
+export function detectJobFamilies(haystack: string): RoleFamily[] {
   const found = new Set<RoleFamily>();
   for (const { family, re } of FAMILY_PATTERNS) {
     if (re.test(haystack)) found.add(family);

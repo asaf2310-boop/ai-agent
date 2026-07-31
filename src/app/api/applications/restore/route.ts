@@ -71,6 +71,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Undo preference learning for this job when user restores it
+    if (current.job_id) {
+      try {
+        await supabase
+          .from("job_feedback")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("job_id", current.job_id);
+      } catch {
+        // migration optional
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       restoredJobId: current.job_id,

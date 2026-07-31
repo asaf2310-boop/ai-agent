@@ -135,19 +135,38 @@ export function HomeClient({ email }: { email?: string | null }) {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "סימון נכשל");
 
+        const dismissed = matches.find(
+          (m) => m.job_id === jobId || m.jobs?.id === jobId,
+        );
+        const company = (dismissed?.jobs?.company || "").trim().toLowerCase();
+        const title = (dismissed?.jobs?.title || "").trim().toLowerCase();
+
+        // Immediate UX: hide this job + same company / near-duplicate titles
         setMatches((prev) =>
-          prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
+          prev.filter((m) => {
+            if (m.job_id === jobId || m.jobs?.id === jobId) return false;
+            const c = (m.jobs?.company || "").trim().toLowerCase();
+            const t = (m.jobs?.title || "").trim().toLowerCase();
+            if (company && c && c === company) return false;
+            if (title && t && (t === title || t.includes(title) || title.includes(t))) {
+              return false;
+            }
+            return true;
+          }),
         );
         await Promise.all([
           loadMatches(resume?.id, { quiet: true }),
           loadApplications(resume?.id, { quiet: true }),
         ]);
-        setMessage("המשרה הוסרה מהפול ועברה להיסטוריה");
+        setMessage(
+          json.detail ||
+            "הוסר ✓ — לא יוצג שוב; המערכת תלמד לא להציע משרות דומות",
+        );
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : "הסרה מהפול נכשלה");
+        setMessage(err instanceof Error ? err.message : "הסרה נכשלה");
       }
     },
-    [resume, loadMatches, loadApplications],
+    [resume, matches, loadMatches, loadApplications],
   );
 
   const restoreToPool = useCallback(
@@ -201,7 +220,9 @@ export function HomeClient({ email }: { email?: string | null }) {
       tailoredCvText: app?.tailored_cv_text,
     });
     setTab("cv");
-    setMessage("המשרה נשארת בפול — מלא פרטים והגש באתר, או לחץ ״הסר מהפול״ כשסיימת");
+    setMessage(
+      "המשרה נשארת בפול — מלא פרטים והגש באתר, או לחץ ״לא מעוניין״ כדי להסיר וללמד את המערכת",
+    );
   }
 
   const autoApplyFromMatch = useCallback(

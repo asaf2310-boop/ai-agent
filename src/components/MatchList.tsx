@@ -368,9 +368,10 @@ export function MatchList({
                     <button
                       type="button"
                       onClick={() => onDismissFromPool?.(job.id, match.id)}
-                      className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)] underline-offset-2 hover:underline"
+                      className="rounded-xl border border-[var(--border)] bg-white/50 px-3 py-1.5 text-xs font-medium text-[var(--muted)] hover:border-red-300 hover:text-red-700"
+                      title="הסר ולא להציע משרות דומות"
                     >
-                      הסר מהפול
+                      לא מעוניין
                     </button>
                   )}
                 </div>

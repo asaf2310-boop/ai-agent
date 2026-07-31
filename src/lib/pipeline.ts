@@ -23,6 +23,10 @@ import {
 } from "@/lib/linkedin-url";
 import { fetchDrushimIsraelJobs } from "@/lib/drushim-jobs";
 import { isFakeIlBoardUrl } from "@/lib/il-boards";
+import {
+  applyRejectionPreference,
+  loadRejectionProfile,
+} from "@/lib/job-preferences";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { extractResumeSignals } from "@/lib/resume-extract";
@@ -342,6 +346,8 @@ export async function matchResumeToJobs(
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || resume.filename;
   const signals = extractResumeSignals(resumeText, resume.skills || []);
+  const ownerId = userId || resume.user_id;
+  const rejections = await loadRejectionProfile(supabase, ownerId);
 
   const { data: jobs, error } = await supabase.from("jobs").select("*");
   if (error) throw new Error(error.message);
@@ -352,16 +358,21 @@ export async function matchResumeToJobs(
       hasActiveJobLink(job),
   );
 
-  const ownerId = userId || resume.user_id;
   const matchRows = [];
   for (const job of israelJobs) {
-    const { score, reasons } = scoreMatch(
+    const base = scoreMatch(
       resumeText,
       resume.skills || [],
       job,
       signals,
     );
-    if (score < minScore) continue;
+    const { score, reasons, reject } = applyRejectionPreference(
+      base.score,
+      base.reasons,
+      job,
+      rejections,
+    );
+    if (reject || score < minScore) continue;
     matchRows.push({
       resume_id: resume.id,
       job_id: job.id,

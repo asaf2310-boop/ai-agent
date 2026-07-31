@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { isClearedFromPool, wasSentToEmployer } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import { recordJobDismissal } from "@/lib/job-preferences";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Explicitly remove a job from the active pool (user tapped "הסר מהפול").
- * Does not run when the user merely opens the job URL in a new tab.
- * Does not downgrade an already-sent employer email / web-form application.
+ * «לא מעוניין» / הסר מהפול:
+ * remove from active pool + record feedback so matching learns to avoid similar jobs.
  */
 export async function POST(request: Request) {
   try {
@@ -49,6 +49,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No resume found" }, { status: 400 });
     }
 
+    const { data: jobRows } = await supabase
+      .from("jobs")
+      .select("id, title, company, description, location")
+      .eq("id", body.jobId)
+      .limit(1);
+    const job = jobRows?.[0];
+
     const { data: existing } = await supabase
       .from("applications")
       .select("*")
@@ -65,13 +72,35 @@ export async function POST(request: Request) {
       });
     }
 
+    // Learn: store dismissal signals for future matching
+    if (job) {
+      await recordJobDismissal(supabase, {
+        userId: user.id,
+        resumeId,
+        jobId: body.jobId,
+        job,
+      });
+    }
+
+    // Drop this match so it won't reappear until a full re-score brings it back
+    try {
+      await supabase
+        .from("job_matches")
+        .delete()
+        .eq("resume_id", resumeId)
+        .eq("job_id", body.jobId);
+    } catch {
+      // best-effort
+    }
+
     const row = {
       resume_id: resumeId,
       job_id: body.jobId,
       match_id: body.matchId || current?.match_id || null,
       status: "prepared" as const,
       method: "link-opened",
-      skip_reason: "הוסר מהפול ידנית — נשמר בהיסטוריה כפתיחת קישור",
+      skip_reason:
+        "לא מעוניין — הוסר מהפול. המערכת תלמד לא להציע משרות דומות",
       recruiter_insights: current?.recruiter_insights ?? null,
       tailored_cv_text: current?.tailored_cv_text ?? null,
       error: null,
@@ -92,9 +121,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       application: data,
       clearedFromPool: isClearedFromPool(data),
+      learned: true,
+      detail: "הוסר ✓ — לא יוצג שוב; נלמד להימנע ממשרות דומות",
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to mark opened";
+    const message = err instanceof Error ? err.message : "Failed to dismiss job";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
