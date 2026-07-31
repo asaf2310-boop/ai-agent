@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { wasSentToEmployer } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -7,7 +8,7 @@ import {
   processApplicationsForResume,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
-import type { Resume } from "@/lib/types";
+import type { Application, Resume } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
@@ -77,10 +78,15 @@ export async function POST(request: Request) {
       user.id,
     );
 
+    const appRows = applications as Application[];
+    const sentCount = appRows.filter((a) => wasSentToEmployer(a)).length;
+
     return NextResponse.json({
       resume,
       matchesCount: matches.length,
       applicationsCount: applications.length,
+      sentCount,
+      notSentCount: applications.length - sentCount,
       matches,
       applications,
     });
