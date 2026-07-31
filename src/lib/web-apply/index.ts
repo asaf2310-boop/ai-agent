@@ -4,7 +4,8 @@ import {
 } from "@/lib/candidate-profile";
 import { submitWebApplication, type WebApplyResult } from "@/lib/web-apply/submit";
 import {
-  isKnownAtsUrl,
+  canAutoApplyViaAts,
+  detectAts,
   resolveApplyPageUrl,
 } from "@/lib/web-apply/urls";
 
@@ -27,9 +28,10 @@ export function isWebApplyEnabled(): boolean {
 }
 
 /**
- * Show «הגש אוטומטית» only for a real ATS form we can POST.
- * Employer email is sent automatically on scan — no misleading button.
- * LinkedIn Easy Apply / search / demos → false.
+ * Show «הגש אוטומטית» / allow server apply when we can POST a form
+ * (known ATS or Remotive/RemoteOK/company career page).
+ * Employer email is sent automatically on scan.
+ * LinkedIn Easy Apply / demos → false.
  */
 export function canAutoApplyJob(job: {
   url?: string | null;
@@ -38,8 +40,7 @@ export function canAutoApplyJob(job: {
   company?: string | null;
 }): boolean {
   if (!isWebApplyEnabled()) return false;
-  const page = resolveApplyPageUrl(job);
-  return Boolean(page && isKnownAtsUrl(page));
+  return canAutoApplyViaAts(job);
 }
 
 /** Auto-fill + submit on the job's apply page when an ATS/careers URL exists. */
@@ -59,7 +60,7 @@ export async function tryAutoWebApply(input: {
   if (!isWebApplyEnabled()) return null;
 
   const applyUrl = resolveApplyPageUrl(input.job);
-  if (!applyUrl || !isKnownAtsUrl(applyUrl)) {
+  if (!applyUrl || detectAts(applyUrl) === "unsupported") {
     return {
       ok: false,
       method: "web-form",

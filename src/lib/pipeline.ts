@@ -17,13 +17,14 @@ import {
   pruneOldLinkedInJobs,
 } from "@/lib/linkedin-jobs";
 import {
+  hasActiveJobLink,
   isBrokenLinkedInUrl,
   safeJobOpenUrl,
 } from "@/lib/linkedin-url";
 import { scoreMatch } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import type { Job, JobMatch, Resume } from "@/lib/types";
-import { tryAutoWebApply } from "@/lib/web-apply";
+import { canAutoApplyJob, tryAutoWebApply } from "@/lib/web-apply";
 
 export { wasSentToEmployer, isClearedFromPool };
 
@@ -290,8 +291,10 @@ export async function matchResumeToJobs(
   const { data: jobs, error } = await supabase.from("jobs").select("*");
   if (error) throw new Error(error.message);
 
-  const israelJobs = ((jobs || []) as Job[]).filter((job) =>
-    isIsraelLocation(job.location, job.description, job.company),
+  const israelJobs = ((jobs || []) as Job[]).filter(
+    (job) =>
+      isIsraelLocation(job.location, job.description, job.company) &&
+      hasActiveJobLink(job),
   );
 
   const ownerId = userId || resume.user_id;
@@ -406,14 +409,27 @@ export async function processApplicationsForResume(
     Number(process.env.MAX_APPLICATIONS_PER_RUN || "40"),
     60,
   );
-  const sorted = [...matches].sort(
-    (a, b) => Number(b.score) - Number(a.score),
-  );
+  // Prefer jobs we can actually auto-send (email or apply page)
+  const sorted = [...matches]
+    .filter((m) => m.jobs && hasActiveJobLink(m.jobs))
+    .sort((a, b) => {
+      const autoA =
+        (a.jobs && resolveEmployerEmail(a.jobs) ? 2 : 0) +
+        (a.jobs && canAutoApplyJob(a.jobs) ? 1 : 0);
+      const autoB =
+        (b.jobs && resolveEmployerEmail(b.jobs) ? 2 : 0) +
+        (b.jobs && canAutoApplyJob(b.jobs) ? 1 : 0);
+      if (autoB !== autoA) return autoB - autoA;
+      return Number(b.score) - Number(a.score);
+    });
   const results = [];
-  let urlFetchBudget = 5;
+  let urlFetchBudget = Math.min(
+    Number(process.env.MAX_EMAIL_FETCH_PER_RUN || "15"),
+    20,
+  );
   let webApplyBudget = Math.min(
-    Number(process.env.MAX_WEB_APPLY_PER_RUN || "10"),
-    15,
+    Number(process.env.MAX_WEB_APPLY_PER_RUN || "20"),
+    25,
   );
 
   for (const match of sorted.slice(0, maxApps)) {
@@ -439,22 +455,9 @@ export async function processApplicationsForResume(
       // continue with normal processing
     }
 
-    const tailored = await tailorResumeForJob({
-      resumeText,
-      jobTitle: job.title,
-      jobCompany: job.company,
-      jobDescription: job.description,
-    });
-
-    const insights = asPlainText(tailored.insights);
-    const tailoredCv = asPlainText(tailored.tailoredCv);
     const isSocial = Boolean(job.is_social) || job.source.startsWith("social");
     let applyEmail = resolveEmployerEmail(job);
-    // Clear synthetic addresses left in DB from older catalog seeds
-    if (
-      job.apply_email &&
-      isSyntheticApplyEmail(job.apply_email)
-    ) {
+    if (job.apply_email && isSyntheticApplyEmail(job.apply_email)) {
       applyEmail = null;
       try {
         await supabase
@@ -476,10 +479,16 @@ export async function processApplicationsForResume(
           .update({ apply_email: applyEmail })
           .eq("id", job.id);
       } catch {
-        // best-effort cleanup of dirty apply_email values
+        // best-effort
       }
     }
-    if (!applyEmail && !isSocial && urlFetchBudget > 0) {
+
+    if (
+      !applyEmail &&
+      urlFetchBudget > 0 &&
+      job.url &&
+      !/linkedin\.com|facebook\.com|t\.me\//i.test(job.url)
+    ) {
       urlFetchBudget -= 1;
       const fetched = await fetchApplyEmailFromUrl(job.url);
       applyEmail =
@@ -495,6 +504,33 @@ export async function processApplicationsForResume(
         }
       }
     }
+
+    // Skip expensive tailor when we cannot auto-send this run
+    const canWeb = canAutoApplyJob(job);
+    const willAttemptSend =
+      enableEmployerEmail &&
+      (Boolean(applyEmail) || (canWeb && webApplyBudget > 0));
+
+    if (!willAttemptSend) {
+      results.push({
+        status: "skipped",
+        method: "manual-only",
+        skip_reason:
+          "אין מייל/טופס להגשה אוטומטית — המשרה בפול להגשה ידנית בקישור",
+        job,
+      });
+      continue;
+    }
+
+    const tailored = await tailorResumeForJob({
+      resumeText,
+      jobTitle: job.title,
+      jobCompany: job.company,
+      jobDescription: job.description,
+    });
+
+    const insights = asPlainText(tailored.insights);
+    const tailoredCv = asPlainText(tailored.tailoredCv);
 
     let status: "sent" | "prepared" | "skipped" | "failed" = "prepared";
     let method: string | null = "in-app";

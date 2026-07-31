@@ -1,4 +1,5 @@
 import type { Job, JobMatch } from "@/lib/types";
+import { hasActiveJobLink } from "@/lib/linkedin-url";
 
 export const POOL_LIMIT = 50;
 
@@ -134,6 +135,7 @@ export function filterMatches(
 ): JobMatch[] {
   return matches.filter((m) => {
     const job = m.jobs;
+    if (!hasActiveJobLink(job)) return false;
     return (
       matchesKind(job, filters.kind) &&
       matchesLocation(job, filters.location) &&

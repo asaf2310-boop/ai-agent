@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isClearedFromPool } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import { hasActiveJobLink } from "@/lib/linkedin-url";
 import {
   buildPoolMatches,
   sortMatchesByNewest,
@@ -115,7 +116,9 @@ export async function GET(request: Request) {
     }
 
     const available = sortMatchesByNewest(
-      matches.filter((m) => !clearedJobIds.has(m.job_id)),
+      matches.filter(
+        (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
+      ),
     );
 
     // Always return at most POOL_LIMIT (50), newest first (+ optional filters)
