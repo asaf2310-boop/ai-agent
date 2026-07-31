@@ -7,7 +7,7 @@ import {
   isSyntheticApplyEmail,
 } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
-import { POOL_LIMIT, sortMatchesByNewest } from "@/lib/match-pool";
+import { POOL_LIMIT, sortMatchesByBestFit } from "@/lib/match-pool";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -154,7 +154,7 @@ export async function POST(request: Request) {
     }
 
     // Wide active set for client-side filters; UI caps display at POOL_LIMIT.
-    const poolMatches = sortMatchesByNewest(
+    const poolMatches = sortMatchesByBestFit(
       matches.filter(
         (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
       ),

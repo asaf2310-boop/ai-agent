@@ -255,7 +255,7 @@ export function MatchList({
       )}
 
       <p className="text-sm text-[var(--muted)]">
-        עד {POOL_LIMIT} משרות · החדשה ביותר קודם
+        עד {POOL_LIMIT} משרות · המתאימות ביותר לקו״ח קודם
         {matches.length > 0
           ? ` · מוצגות ${filtered.length} מתוך ${filteredCount} אחרי סינון (${matches.length} זמינות)`
           : ""}

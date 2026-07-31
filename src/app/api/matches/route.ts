@@ -6,7 +6,7 @@ import {
   buildPoolMatches,
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
-  sortMatchesByNewest,
+  sortMatchesByBestFit,
   uniqueLocations,
   type MatchPoolFilters,
 } from "@/lib/match-pool";
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     const resumeId = searchParams.get("resumeId");
     const filters = parseFilters(searchParams);
     const minScore = Number(
-      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.2",
+      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.32",
     );
 
     const supabase = createAdminClient();
@@ -117,7 +117,7 @@ export async function GET(request: Request) {
       // if applications query fails, return unfiltered matches
     }
 
-    const available = sortMatchesByNewest(
+    const available = sortMatchesByBestFit(
       matches.filter(
         (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
       ),
