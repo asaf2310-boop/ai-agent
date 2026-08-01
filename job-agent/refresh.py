@@ -465,6 +465,16 @@ def _daily_auto_apply_remaining(client: Client, user_id: str | None) -> int:
         return quota
 
 
+def _is_history_application(row: dict[str, Any] | None) -> bool:
+    """Real employer send or user dismiss/open — must never be overwritten."""
+    if not row:
+        return False
+    method = row.get("method")
+    if method == "link-opened":
+        return True
+    return row.get("status") == "sent" and method in ("job-email", "web-form")
+
+
 def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
     """Auto-email employers when apply_email exists. Persist only successful sends (history)."""
     enable_employer = os.getenv("ENABLE_EMPLOYER_EMAIL", "true").lower() not in (
@@ -473,18 +483,31 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         "no",
         "off",
     )
+    if not os.getenv("RESEND_API_KEY"):
+        print(
+            "warning: RESEND_API_KEY not set — Python path will not email; "
+            "rely on Next /api/cron/auto-apply (web-form + Resend on Vercel) for History"
+        )
+        return 0
+    if not enable_employer:
+        print("warning: ENABLE_EMPLOYER_EMAIL=false — skipping employer emails")
+        return 0
+
     reply_to = normalize_apply_email(
         os.getenv("CANDIDATE_EMAIL") or os.getenv("APPLICATION_CANDIDATE_EMAIL")
     )
     max_apps = min(int(os.getenv("MAX_APPLICATIONS_PER_RUN", "40")), 60)
     ranked = sorted(matches, key=lambda m: float(m.get("score") or 0), reverse=True)
     written = 0
+    skipped_existing = 0
     # Per-user remaining slots for today (Israel day)
     remaining_by_user: dict[str, int] = {}
 
     for match in ranked[:max_apps]:
         job = match.get("jobs") or {}
         resume = match.get("_resume") or {}
+        if not resume.get("id") or not job.get("id"):
+            continue
         user_id = resume.get("user_id")
         uid_key = user_id or "__anon__"
         if uid_key not in remaining_by_user:
@@ -492,12 +515,30 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         if remaining_by_user[uid_key] <= 0:
             continue
 
+        # Never overwrite History / dismiss rows (previous bug wiped sent apps)
+        try:
+            existing_q = (
+                client.table("applications")
+                .select("id,status,method")
+                .eq("resume_id", resume["id"])
+                .eq("job_id", job["id"])
+                .limit(1)
+            )
+            if user_id:
+                existing_q = existing_q.eq("user_id", user_id)
+            existing = (existing_q.execute().data or [None])[0]
+            if _is_history_application(existing):
+                skipped_existing += 1
+                continue
+        except Exception as exc:
+            print(f"existing application lookup failed: {exc}")
+
         apply_email = normalize_apply_email(job.get("apply_email"))
         if not apply_email:
             apply_email = normalize_apply_email(job.get("description"))
 
         # Only attempt jobs that can be auto-emailed (web-form is handled by Next cron)
-        if not enable_employer or not apply_email:
+        if not apply_email:
             continue
 
         resume_text = resume.get("extracted_text") or " ".join(resume.get("skills") or [])
@@ -538,6 +579,9 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
         ).execute()
         written += 1
         remaining_by_user[uid_key] -= 1
+
+    if skipped_existing:
+        print(f"preserved_history_rows={skipped_existing}")
     return written
 
 
@@ -563,7 +607,7 @@ def run() -> None:
         "refresh ok: "
         f"upserted={len(upserted)} linkedin={linkedin_count} social={social_count} "
         f"pruned={pruned} pruned_linkedin={pruned_li} "
-        f"matches_written={len(matches)} applications={applied}"
+        f"matches_written={len(matches)} applications_sent={applied}"
     )
 
 

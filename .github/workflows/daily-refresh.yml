@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Primary: Next.js cron — email + web-form auto-apply, 20/day quota, history
+  # Primary: Next.js cron — email + web-form auto-apply → History (job-email / web-form)
   auto-apply:
     runs-on: ubuntu-latest
     steps:
@@ -18,21 +18,35 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
-          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
-            echo "Missing APP_URL or CRON_SECRET — skip Next cron (configure repo secrets)."
-            exit 0
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Missing GitHub secret CRON_SECRET."
+            echo "Set the same value in Vercel env CRON_SECRET so morning/evening scans can auto-apply into History."
+            exit 1
           fi
-          BASE="${APP_URL%/}"
+          # Prefer secret; fall back to production Vercel URL (repo homepage)
+          BASE="${APP_URL:-https://ai-agent-tan-five.vercel.app}"
+          BASE="${BASE%/}"
           echo "Calling ${BASE}/api/cron/auto-apply"
-          curl -fsS -X POST "${BASE}/api/cron/auto-apply" \
+          HTTP_CODE=$(curl -sS -o /tmp/cron-result.json -w "%{http_code}" -X POST \
+            "${BASE}/api/cron/auto-apply" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            --max-time 300 \
-            -o /tmp/cron-result.json
-          cat /tmp/cron-result.json
+            --max-time 300) || true
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/cron-result.json || true
           echo
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Cron auto-apply failed (HTTP ${HTTP_CODE}). Check CRON_SECRET / APP_URL / Vercel logs."
+            exit 1
+          fi
+          TOTAL_SENT=$(python3 -c "import json; print(json.load(open('/tmp/cron-result.json')).get('totalSent', 0))" 2>/dev/null || echo 0)
+          echo "totalSent=${TOTAL_SENT}"
+          if [ "${TOTAL_SENT}" = "0" ]; then
+            echo "::warning::Cron finished with 0 sends. History stays empty until RESEND_API_KEY (email) or web-form apply succeeds on Vercel."
+          fi
 
-  # Fallback scrape into Supabase (LinkedIn/social) — respects same daily email quota
+  # Scrape into Supabase (LinkedIn/social/catalog). Email apply only when Resend is configured;
+  # never writes skipped rows into History.
   refresh:
     runs-on: ubuntu-latest
     defaults:

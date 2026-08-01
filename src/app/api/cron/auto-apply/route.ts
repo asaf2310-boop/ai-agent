@@ -21,9 +21,17 @@ function authorizeCron(request: Request): boolean {
   if (!secret) return false;
   const auth = request.headers.get("authorization") || "";
   if (auth === `Bearer ${secret}`) return true;
-  // Vercel Cron also sends this header when CRON_SECRET is configured
+  // Some Vercel setups forward the secret in a dedicated header
   const vercel = request.headers.get("x-vercel-cron-secret") || "";
-  return vercel === secret;
+  if (vercel === secret) return true;
+  // Query param fallback for manual ops: /api/cron/auto-apply?secret=...
+  try {
+    const url = new URL(request.url);
+    if (url.searchParams.get("secret") === secret) return true;
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 /**
