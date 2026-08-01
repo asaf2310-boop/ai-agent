@@ -34,7 +34,10 @@ function statusLabel(app: Application): string {
     return "נשלח";
   }
   if (wasSentToRealEmployer(app)) return "נשלח";
-  if (wasLinkOpened(app)) return "הוסר מהפול";
+  if (wasLinkOpened(app)) {
+    if (/נפתח באתר/i.test(app.skip_reason || "")) return "נפתח באתר";
+    return "הוסר מהפול";
+  }
   return "";
 }
 

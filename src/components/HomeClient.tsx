@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppBottomNav,
   AppTopBar,
@@ -13,6 +13,31 @@ import { MatchList } from "@/components/MatchList";
 import { ResumeUpload } from "@/components/ResumeUpload";
 import type { Application, JobMatch, Resume } from "@/lib/types";
 import { safeJobOpenUrl } from "@/lib/linkedin-url";
+
+type OpenReason = "dismiss" | "opened";
+type PendingSiteOpen = { jobId: string; matchId?: string };
+
+const PENDING_SITE_OPENS_KEY = "allin_pending_site_opens";
+
+function readPendingSiteOpens(): PendingSiteOpen[] {
+  try {
+    const raw = sessionStorage.getItem(PENDING_SITE_OPENS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PendingSiteOpen[];
+    return Array.isArray(parsed) ? parsed.filter((p) => p?.jobId) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingSiteOpens(items: PendingSiteOpen[]) {
+  try {
+    if (!items.length) sessionStorage.removeItem(PENDING_SITE_OPENS_KEY);
+    else sessionStorage.setItem(PENDING_SITE_OPENS_KEY, JSON.stringify(items));
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 type Summary = {
   total: number;
@@ -47,11 +72,15 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [dismissBusyId, setDismissBusyId] = useState<string | null>(null);
   const [bulkDismissBusy, setBulkDismissBusy] = useState(false);
-  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(() => {
+    // Hide jobs already opened in this session until History flush completes
+    return new Set(readPendingSiteOpens().map((p) => p.jobId));
+  });
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /** Jobs opened via «פתח באתר» — finalize to History when user returns. */
+  const pendingSiteOpens = useRef<PendingSiteOpen[]>(readPendingSiteOpens());
+  const flushingSiteOpens = useRef(false);
   const [autofillJob, setAutofillJob] = useState<{
     jobId?: string;
     title?: string | null;
@@ -152,24 +181,32 @@ export function HomeClient({ email }: { email?: string | null }) {
     void loadSavedResume();
   }, [loadSavedResume]);
 
-  const markJobOpened = useCallback(
-    async (jobId: string, matchId?: string) => {
+  const clearJobFromPool = useCallback(
+    async (
+      jobId: string,
+      matchId: string | undefined,
+      reason: OpenReason,
+      opts?: { quiet?: boolean; optimistic?: boolean },
+    ) => {
       if (!jobId) {
         setMessage("חסר מזהה משרה — רענן את הפול ונסה שוב");
-        return;
+        return false;
       }
-      setDismissBusyId(jobId);
-      setMessage(null);
+      if (!opts?.quiet) {
+        setDismissBusyId(jobId);
+        setMessage(null);
+      }
 
-      // Optimistic remove + remember for this session (survives reload races)
-      setDismissedJobIds((prev) => {
-        const next = new Set(prev);
-        next.add(jobId);
-        return next;
-      });
-      setMatches((prev) =>
-        prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
-      );
+      if (opts?.optimistic !== false) {
+        setDismissedJobIds((prev) => {
+          const next = new Set(prev);
+          next.add(jobId);
+          return next;
+        });
+        setMatches((prev) =>
+          prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
+        );
+      }
 
       try {
         const res = await fetch("/api/applications/open", {
@@ -179,11 +216,11 @@ export function HomeClient({ email }: { email?: string | null }) {
             jobId,
             matchId,
             resumeId: resume?.id,
+            reason,
           }),
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || json.ok === false) {
-          // Roll back optimistic hide on hard failure
           setDismissedJobIds((prev) => {
             const next = new Set(prev);
             next.delete(jobId);
@@ -201,22 +238,115 @@ export function HomeClient({ email }: { email?: string | null }) {
             return [json.application, ...rest];
           });
         }
-        setMessage(
-          json.detail ||
-            "הוסר ✓ — לא יוצג שוב; המערכת תלמד לא להציע משרות דומות",
-        );
+        if (!opts?.quiet) {
+          setMessage(
+            json.detail ||
+              (reason === "opened"
+                ? "נפתח באתר ✓ — המשרה בהיסטוריה"
+                : "הוסר ✓ — לא יוצג שוב; המערכת תלמד לא להציע משרות דומות"),
+          );
+        }
         void loadApplications(resume?.id, { quiet: true });
         void loadMatches(resume?.id, { quiet: true });
+        return true;
       } catch (err) {
-        setMessage(err instanceof Error ? err.message : "הסרה נכשלה");
-        // Put the list back from server if dismiss failed
+        if (!opts?.quiet) {
+          setMessage(err instanceof Error ? err.message : "הסרה נכשלה");
+        }
         void loadMatches(resume?.id, { quiet: true });
+        return false;
       } finally {
-        setDismissBusyId(null);
+        if (!opts?.quiet) setDismissBusyId(null);
       }
     },
     [resume, loadMatches, loadApplications],
   );
+
+  const flushPendingSiteOpens = useCallback(async () => {
+    if (flushingSiteOpens.current) return;
+    const pending = pendingSiteOpens.current.length
+      ? pendingSiteOpens.current
+      : readPendingSiteOpens();
+    if (!pending.length) return;
+    flushingSiteOpens.current = true;
+    pendingSiteOpens.current = [];
+    writePendingSiteOpens([]);
+    try {
+      let moved = 0;
+      for (const item of pending) {
+        const ok = await clearJobFromPool(item.jobId, item.matchId, "opened", {
+          quiet: true,
+          // Already removed from the list when the link was opened
+          optimistic: false,
+        });
+        if (ok) moved += 1;
+      }
+      if (moved > 0) {
+        setMessage(
+          moved === 1
+            ? "חזרת לאפליקציה ✓ — המשרה בהיסטוריה; ממשיכים מהבאה"
+            : `חזרת לאפליקציה ✓ — ${moved} משרות בהיסטוריה; ממשיכים מהבאות`,
+        );
+        void loadApplications(resume?.id, { quiet: true });
+        void loadMatches(resume?.id, { quiet: true });
+      }
+    } finally {
+      flushingSiteOpens.current = false;
+    }
+  }, [clearJobFromPool, loadApplications, loadMatches, resume?.id]);
+
+  useEffect(() => {
+    // Flush any opens left from a previous session / backgrounded tab
+    if (document.visibilityState === "visible") {
+      void flushPendingSiteOpens();
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void flushPendingSiteOpens();
+      }
+    };
+    const onFocus = () => {
+      void flushPendingSiteOpens();
+    };
+    const onPageShow = () => {
+      void flushPendingSiteOpens();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [flushPendingSiteOpens]);
+
+  const openSiteFromMatch = useCallback((match: JobMatch, url: string) => {
+    const jobId = match.jobs?.id || match.job_id;
+    if (!jobId || !url) return;
+
+    // Open employer site first (mobile browsers need sync user gesture)
+    window.open(url, "_blank", "noopener,noreferrer");
+
+    // Queue finalize-to-history for when the user returns to the app
+    const nextPending = [
+      ...pendingSiteOpens.current.filter((p) => p.jobId !== jobId),
+      { jobId, matchId: match.id },
+    ];
+    pendingSiteOpens.current = nextPending;
+    writePendingSiteOpens(nextPending);
+
+    // Advance the pool immediately so the next job is already in view
+    setDismissedJobIds((prev) => {
+      const next = new Set(prev);
+      next.add(jobId);
+      return next;
+    });
+    setMatches((prev) =>
+      prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
+    );
+    setMessage("נפתח באתר — כשתחזור לאפליקציה המשרה תעבור להיסטוריה");
+  }, []);
 
   const bulkDismissFromPool = useCallback(
     async (jobIds: string[]) => {
@@ -515,9 +645,10 @@ export function HomeClient({ email }: { email?: string | null }) {
               matches={matches}
               loading={loadingMatches}
               onDismissFromPool={(jobId, matchId) => {
-                void markJobOpened(jobId, matchId);
+                void clearJobFromPool(jobId, matchId, "dismiss");
               }}
               onBulkDismiss={(jobIds) => bulkDismissFromPool(jobIds)}
+              onOpenSite={openSiteFromMatch}
               onPrepareApply={prepareApplyFromMatch}
               dismissBusyId={dismissBusyId}
               bulkDismissBusy={bulkDismissBusy}
@@ -530,7 +661,7 @@ export function HomeClient({ email }: { email?: string | null }) {
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">היסטוריה</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  מייל/הגשה באתר · הוסרה מהפול (אפשר להחזיר)
+                  נשלח · נפתח באתר · הוסר מהפול (אפשר להחזיר)
                 </p>
             </div>
             <ApplicationReport
