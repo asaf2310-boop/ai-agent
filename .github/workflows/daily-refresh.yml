@@ -8,6 +8,45 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Primary: Next.js cron — email + web-form auto-apply → History (job-email / web-form)
+  auto-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Twice-daily auto-apply (quota 20)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Missing GitHub secret CRON_SECRET."
+            echo "Set the same value in Vercel env CRON_SECRET so morning/evening scans can auto-apply into History."
+            exit 1
+          fi
+          # Prefer secret; fall back to production Vercel URL (repo homepage)
+          BASE="${APP_URL:-https://ai-agent-tan-five.vercel.app}"
+          BASE="${BASE%/}"
+          echo "Calling ${BASE}/api/cron/auto-apply"
+          HTTP_CODE=$(curl -sS -o /tmp/cron-result.json -w "%{http_code}" -X POST \
+            "${BASE}/api/cron/auto-apply" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            --max-time 300) || true
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/cron-result.json || true
+          echo
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Cron auto-apply failed (HTTP ${HTTP_CODE}). Check CRON_SECRET / APP_URL / Vercel logs."
+            exit 1
+          fi
+          TOTAL_SENT=$(python3 -c "import json; print(json.load(open('/tmp/cron-result.json')).get('totalSent', 0))" 2>/dev/null || echo 0)
+          echo "totalSent=${TOTAL_SENT}"
+          if [ "${TOTAL_SENT}" = "0" ]; then
+            echo "::warning::Cron finished with 0 sends. History stays empty until RESEND_API_KEY (email) or web-form apply succeeds on Vercel."
+          fi
+
+  # Scrape into Supabase (LinkedIn/social/catalog). Email apply only when Resend is configured;
+  # never writes skipped rows into History.
   refresh:
     runs-on: ubuntu-latest
     defaults:
@@ -35,6 +74,7 @@ jobs:
           SUPABASE_SCHEMA: job_agent
           MIN_MATCH_SCORE: "0.2"
           MAX_JOB_AGE_DAYS: "7"
+          DAILY_AUTO_APPLY_QUOTA: "20"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

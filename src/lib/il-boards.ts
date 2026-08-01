@@ -68,6 +68,9 @@ export function isLiveBoardSource(source: string | null | undefined): boolean {
     s === "remotive" ||
     s === "arbeitnow" ||
     s === "jobicy" ||
+    s === "greenhouse" ||
+    s === "lever" ||
+    s === "ashby" ||
     s.startsWith("rss-")
   );
 }

@@ -421,97 +421,167 @@ def send_resend_email(to_email: str, subject: str, body: str) -> tuple[bool, str
         return False, str(exc.reason), "resend"
 
 
+def _israel_day_bounds_utc() -> tuple[str, str]:
+    """UTC ISO start/end for the current calendar day in Asia/Jerusalem."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Jerusalem"))
+        start_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = start_local + timedelta(days=1)
+        return (
+            start_local.astimezone(timezone.utc).isoformat(),
+            end_local.astimezone(timezone.utc).isoformat(),
+        )
+    except Exception:
+        # Fallback: approximate Israel as UTC+3
+        now = datetime.now(timezone.utc) + timedelta(hours=3)
+        start = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=3))
+        end = start + timedelta(days=1)
+        return start.isoformat(), end.isoformat()
+
+
+def _daily_auto_apply_remaining(client: Client, user_id: str | None) -> int:
+    quota = max(0, min(int(os.getenv("DAILY_AUTO_APPLY_QUOTA", "20")), 100))
+    if not user_id:
+        return quota
+    start_iso, end_iso = _israel_day_bounds_utc()
+    try:
+        res = (
+            client.table("applications")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("status", "sent")
+            .in_("method", ["job-email", "web-form"])
+            .gte("created_at", start_iso)
+            .lt("created_at", end_iso)
+            .limit(200)
+            .execute()
+        )
+        used = len(res.data or [])
+        return max(0, quota - used)
+    except Exception as exc:
+        print(f"daily quota count failed: {exc}")
+        return quota
+
+
+def _is_history_application(row: dict[str, Any] | None) -> bool:
+    """Real employer send or user dismiss/open — must never be overwritten."""
+    if not row:
+        return False
+    method = row.get("method")
+    if method == "link-opened":
+        return True
+    return row.get("status") == "sent" and method in ("job-email", "web-form")
+
+
 def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
-    """Auto-email employers when apply_email exists; otherwise mark not-sent in-app."""
+    """Auto-email employers when apply_email exists. Persist only successful sends (history)."""
     enable_employer = os.getenv("ENABLE_EMPLOYER_EMAIL", "true").lower() not in (
         "0",
         "false",
         "no",
         "off",
     )
+    if not os.getenv("RESEND_API_KEY"):
+        print(
+            "warning: RESEND_API_KEY not set — Python path will not email; "
+            "rely on Next /api/cron/auto-apply (web-form + Resend on Vercel) for History"
+        )
+        return 0
+    if not enable_employer:
+        print("warning: ENABLE_EMPLOYER_EMAIL=false — skipping employer emails")
+        return 0
+
     reply_to = normalize_apply_email(
         os.getenv("CANDIDATE_EMAIL") or os.getenv("APPLICATION_CANDIDATE_EMAIL")
     )
     max_apps = min(int(os.getenv("MAX_APPLICATIONS_PER_RUN", "40")), 60)
     ranked = sorted(matches, key=lambda m: float(m.get("score") or 0), reverse=True)
     written = 0
+    skipped_existing = 0
+    # Per-user remaining slots for today (Israel day)
+    remaining_by_user: dict[str, int] = {}
+
     for match in ranked[:max_apps]:
         job = match.get("jobs") or {}
         resume = match.get("_resume") or {}
-        resume_text = resume.get("extracted_text") or " ".join(resume.get("skills") or [])
-        insights, tailored, _ = openai_tailor(resume_text, job)
+        if not resume.get("id") or not job.get("id"):
+            continue
+        user_id = resume.get("user_id")
+        uid_key = user_id or "__anon__"
+        if uid_key not in remaining_by_user:
+            remaining_by_user[uid_key] = _daily_auto_apply_remaining(client, user_id)
+        if remaining_by_user[uid_key] <= 0:
+            continue
+
+        # Never overwrite History / dismiss rows (previous bug wiped sent apps)
+        try:
+            existing_q = (
+                client.table("applications")
+                .select("id,status,method")
+                .eq("resume_id", resume["id"])
+                .eq("job_id", job["id"])
+                .limit(1)
+            )
+            if user_id:
+                existing_q = existing_q.eq("user_id", user_id)
+            existing = (existing_q.execute().data or [None])[0]
+            if _is_history_application(existing):
+                skipped_existing += 1
+                continue
+        except Exception as exc:
+            print(f"existing application lookup failed: {exc}")
 
         apply_email = normalize_apply_email(job.get("apply_email"))
         if not apply_email:
             apply_email = normalize_apply_email(job.get("description"))
 
-        is_social = bool(job.get("is_social")) or str(job.get("source", "")).startswith("social")
-        status = "prepared"
-        method = "in-app"
-        skip_reason = None
-        error = None
+        # Only attempt jobs that can be auto-emailed (web-form is handled by Next cron)
+        if not apply_email:
+            continue
 
-        if not enable_employer:
-            status = "skipped"
-            method = "disabled"
-            skip_reason = "שליחה אוטומטית כבויה (ENABLE_EMPLOYER_EMAIL=false)"
-        elif not apply_email:
-            status = "skipped"
-            method = "link-only" if is_social else "no-email"
-            skip_reason = (
-                "לא נשלח — פוסט ברשת. הגשה ידנית דרך הקישור"
-                if is_social
-                else "לא נשלח — אין מייל הגשה. קו״ח מותאם מוכן להגשה ידנית"
-            )
-        else:
-            body = (
-                f"שלום,\n\n"
-                f"מצורפת מועמדות למשרה: {job.get('title')}\n"
-                f"חברה: {job.get('company')}\n"
-                f"קישור: {job.get('url')}\n\n"
-                f"סיכום התאמה:\n{insights}\n\n"
-                f"קו״ח מותאם:\n{tailored}\n"
-            )
-            if reply_to:
-                body += f"\nליצירת קשר: {reply_to}\n"
-            subject = f"מועמדות: {job.get('title')}"
-            ok, err, method_name = send_resend_email(apply_email, subject, body)
-            if ok:
-                status = "sent"
-                method = "job-email"
-                skip_reason = None
-            elif err and "RESEND_API_KEY" in err:
-                status = "skipped"
-                method = "no-resend"
-                skip_reason = "לא נשלח — חסר RESEND_API_KEY"
-            elif err and ("Invalid 'to' field" in err or "validation_error" in err):
-                status = "failed"
-                method = method_name
-                error = err
-                skip_reason = "לא נשלח — כתובת המייל של המעסיק לא תקינה (פורמט Resend)"
-            else:
-                status = "failed"
-                method = method_name
-                error = err
-                skip_reason = "לא נשלח — שגיאה בשליחה למעסיק"
+        resume_text = resume.get("extracted_text") or " ".join(resume.get("skills") or [])
+        insights, tailored, _ = openai_tailor(resume_text, job)
+
+        body = (
+            f"שלום,\n\n"
+            f"מצורפת מועמדות למשרה: {job.get('title')}\n"
+            f"חברה: {job.get('company')}\n"
+            f"קישור: {job.get('url')}\n\n"
+            f"סיכום התאמה:\n{insights}\n\n"
+            f"קו״ח מותאם:\n{tailored}\n"
+        )
+        if reply_to:
+            body += f"\nליצירת קשר: {reply_to}\n"
+        subject = f"מועמדות: {job.get('title')}"
+        ok, err, _method_name = send_resend_email(apply_email, subject, body)
+        if not ok:
+            if err:
+                print(f"skip email to {apply_email}: {err}")
+            continue
 
         client.table("applications").upsert(
             {
                 "resume_id": resume["id"],
                 "job_id": job["id"],
                 "match_id": match.get("id"),
-                "status": status,
-                "method": method,
-                "skip_reason": skip_reason,
+                "status": "sent",
+                "method": "job-email",
+                "skip_reason": None,
                 "recruiter_insights": insights,
                 "tailored_cv_text": tailored,
-                "error": error,
+                "error": None,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                **({"user_id": resume["user_id"]} if resume.get("user_id") else {}),
+                **({"user_id": user_id} if user_id else {}),
             },
             on_conflict="resume_id,job_id",
         ).execute()
         written += 1
+        remaining_by_user[uid_key] -= 1
+
+    if skipped_existing:
+        print(f"preserved_history_rows={skipped_existing}")
     return written
 
 
@@ -537,7 +607,7 @@ def run() -> None:
         "refresh ok: "
         f"upserted={len(upserted)} linkedin={linkedin_count} social={social_count} "
         f"pruned={pruned} pruned_linkedin={pruned_li} "
-        f"matches_written={len(matches)} applications={applied}"
+        f"matches_written={len(matches)} applications_sent={applied}"
     )
 
 

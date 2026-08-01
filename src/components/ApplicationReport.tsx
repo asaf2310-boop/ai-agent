@@ -21,6 +21,9 @@ type Props = {
     prepared: number;
     skipped: number;
     failed: number;
+    dailyAutoUsed?: number;
+    dailyAutoQuota?: number;
+    dailyAutoRemaining?: number;
   };
   onRestoreToPool?: (app: Application) => void;
   restoreBusyId?: string | null;
@@ -239,6 +242,12 @@ export function ApplicationReport({
         <span className="font-medium text-[var(--accent)]">
           הוסר: {openedCount}
         </span>
+        {typeof summary?.dailyAutoUsed === "number" &&
+          typeof summary?.dailyAutoQuota === "number" && (
+            <span>
+              אוטומטי היום: {summary.dailyAutoUsed}/{summary.dailyAutoQuota}
+            </span>
+          )}
       </div>
 
       {history.length === 0 ? (

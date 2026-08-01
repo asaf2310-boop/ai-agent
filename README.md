@@ -71,4 +71,19 @@ Optional: `GROQ_API_KEY`, `RESEND_API_KEY`, `APPLICATION_NOTIFY_EMAIL`, `SOCIAL_
 1. Sign in with Gmail.
 2. Upload CV → owned by your user id.
 3. Match / tailor / apply scoped to your data.
-4. Actions scan twice daily using service role.
+4. Twice daily (`05:00` / `17:00` UTC ≈ morning & evening Israel): GitHub Actions + Vercel Cron call `/api/cron/auto-apply`, which syncs jobs and auto-sends (email or web-form) up to **20 successful applications per user per Israel day**. Only real sends appear in History.
+5. Job sources: LinkedIn, Drushim, Remotive/RemoteOK, plus **company career boards** (Greenhouse / Lever / Ashby) for Israel tech, finance, cyber, and startups — matched to your CV.
+
+### Cron secrets (required for History from the morning/evening scan)
+
+Without these, the scheduled scan scrapes jobs but **does not** write auto-sends to History.
+
+| Secret / env | Where |
+|--------------|--------|
+| `CRON_SECRET` | **Required** — same value in Vercel env + GitHub Actions secrets |
+| `APP_URL` | GitHub Actions (defaults to `https://ai-agent-tan-five.vercel.app` if unset) |
+| `RESEND_API_KEY` | Vercel (and optionally GitHub) — needed for email auto-apply |
+| `APPLICATION_FROM_EMAIL` | Vercel — verified Resend from-address |
+| `DAILY_AUTO_APPLY_QUOTA` | Optional, default `20` |
+
+History only lists real `job-email` / `web-form` sends (and link opens). Skipped/failed attempts are never stored as history.

@@ -72,9 +72,16 @@ function matchesKind(job: Job | undefined, kind: MatchPoolFilters["kind"]): bool
       channel.includes("telegram") ||
       channel.includes("group") ||
       (Boolean(job.is_social) &&
-        !["remoteok", "remotive", "arbeitnow", "jobicy", "drushim"].includes(
-          source,
-        ))
+        ![
+          "remoteok",
+          "remotive",
+          "arbeitnow",
+          "jobicy",
+          "drushim",
+          "greenhouse",
+          "lever",
+          "ashby",
+        ].includes(source))
     );
   }
   if (kind === "freelance") {

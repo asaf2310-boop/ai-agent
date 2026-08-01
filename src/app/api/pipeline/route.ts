@@ -7,6 +7,7 @@ import {
   isSyntheticApplyEmail,
 } from "@/lib/apply-email";
 import { requireUser } from "@/lib/auth";
+import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { POOL_LIMIT, sortMatchesByBestFit } from "@/lib/match-pool";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -14,6 +15,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncCompanyCareerJobs,
   syncDrushimJobs,
   syncLinkedInJobs,
   syncLiveSocialJobs,
@@ -33,6 +35,7 @@ export async function POST(request: Request) {
     await ensureSampleJobs(supabase);
     await syncLiveSocialJobs(supabase);
     await syncDrushimJobs(supabase);
+    await syncCompanyCareerJobs(supabase);
     await syncLinkedInJobs(supabase);
 
     let resumeQuery = supabase
@@ -161,6 +164,7 @@ export async function POST(request: Request) {
     ).slice(0, Math.max(POOL_LIMIT, 200));
 
     const historyApps = appRows.filter((a) => isHistoryEntry(a));
+    const dailyQuota = await getDailyAutoApplyUsage(supabase, user.id);
 
     return NextResponse.json({
       resume,
@@ -169,6 +173,7 @@ export async function POST(request: Request) {
       sentCount,
       notSentCount: 0,
       openedCount: normalizedApps.filter((a) => a.method === "link-opened").length,
+      dailyQuota,
       matches: poolMatches,
       applications: historyApps,
     });
