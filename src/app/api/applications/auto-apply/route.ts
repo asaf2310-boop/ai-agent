@@ -11,9 +11,9 @@ import { tryAutoWebApply, canAutoApplyJob } from "@/lib/web-apply";
 import { hasActiveJobLink, safeJobOpenUrl } from "@/lib/linkedin-url";
 
 /**
- * «הגש אוטומטית»:
- * - If the employer form can be submitted → status sent, leave pool, history
- * - If not → do NOT mark sent; return tailored CV so the user can continue applying
+ * Server-side ATS auto-apply (used by scan/cron helpers).
+ * Pool UI no longer exposes a button — only known ATS forms are accepted.
+ * If submit fails → do NOT mark sent (manual jobs stay in the pool).
  */
 export async function POST(request: Request) {
   try {
@@ -78,12 +78,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    if (!hasActiveJobLink(job) && !canAutoApplyJob(job)) {
+    if (!canAutoApplyJob(job)) {
       return NextResponse.json(
         {
           ok: false,
           needsManual: true,
-          error: "אין קישור הגשה. השתמש ב״מלא טופס מהקו״ח״.",
+          error:
+            "אין הגשה אוטומטית למשרה הזו — היא שייכת לפול להגשה ידנית (מלא טופס מהקו״ח).",
         },
         { status: 422 },
       );

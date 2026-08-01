@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
 import { safeJobOpenUrl } from "@/lib/linkedin-url";
-import { canAutoApplyJob } from "@/lib/web-apply";
 import {
   DEFAULT_POOL_FILTERS,
   POOL_LIMIT,
@@ -21,8 +20,6 @@ type Props = {
   /** Explicitly remove from pool (not on mere link open). */
   onDismissFromPool?: (jobId: string, matchId: string) => void;
   onPrepareApply?: (match: JobMatch) => void;
-  onAutoApply?: (match: JobMatch) => void;
-  autoApplyBusyId?: string | null;
   dismissBusyId?: string | null;
 };
 
@@ -85,8 +82,6 @@ export function MatchList({
   loading,
   onDismissFromPool,
   onPrepareApply,
-  onAutoApply,
-  autoApplyBusyId = null,
   dismissBusyId = null,
 }: Props) {
   const [filters, setFilters] = useState<MatchPoolFilters>(DEFAULT_POOL_FILTERS);
@@ -257,7 +252,7 @@ export function MatchList({
       )}
 
       <p className="text-sm text-[var(--muted)]">
-        עד {POOL_LIMIT} משרות · המתאימות ביותר לקו״ח קודם
+        עד {POOL_LIMIT} משרות להגשה ידנית · המתאימות ביותר לקו״ח קודם
         {matches.length > 0
           ? ` · מוצגות ${filtered.length} מתוך ${filteredCount} אחרי סינון (${matches.length} זמינות)`
           : ""}
@@ -265,8 +260,9 @@ export function MatchList({
 
       {matches.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          עדיין אין משרות בפול עם קישור פעיל. לחץ ״הפעל סריקה + הגשה אוטומטית״ —
-          נטען דרושים, LinkedIn, Remotive ו-RemoteOK עם קישורים אמיתיים.
+          אין כרגע משרות להגשה ידנית. משרות שאפשר לשלוח אליהן אוטומטית (מייל /
+          ATS) עוברות בסריקה להיסטוריה — לא לפול. לחץ ״הפעל סריקה + הגשה
+          אוטומטית״ לרענון.
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
@@ -285,8 +281,6 @@ export function MatchList({
               channel: job?.channel,
               external_id: job?.external_id,
             });
-            // Only when a real ATS/career form POST is possible
-            const showAutoApply = Boolean(job && canAutoApplyJob(job));
             const dismissId = job?.id || match.job_id;
             const busyDismiss = Boolean(
               dismissId && dismissBusyId === dismissId,
@@ -329,26 +323,10 @@ export function MatchList({
                   </p>
                 )}
                 <div className="relative z-10 mt-2 flex flex-wrap gap-2">
-                  {showAutoApply && (
-                    <button
-                      type="button"
-                      onClick={() => onAutoApply?.(match)}
-                      disabled={autoApplyBusyId === dismissId}
-                      className="min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
-                    >
-                      {autoApplyBusyId === dismissId
-                        ? "מגיש…"
-                        : "הגש אוטומטית"}
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => onPrepareApply?.(match)}
-                    className={
-                      showAutoApply
-                        ? "min-h-10 touch-manipulation rounded-xl border border-[var(--border)] bg-white/60 px-3 py-2 text-xs font-medium"
-                        : "min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white"
-                    }
+                    className="min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white"
                   >
                     מלא טופס מהקו״ח
                   </button>

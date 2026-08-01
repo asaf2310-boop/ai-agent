@@ -21,6 +21,7 @@ import {
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
 import type { Application, Resume } from "@/lib/types";
+import { canAutoSendJob } from "@/lib/web-apply";
 
 export async function POST(request: Request) {
   try {
@@ -156,10 +157,13 @@ export async function POST(request: Request) {
       }
     }
 
-    // Wide active set for client-side filters; UI caps display at POOL_LIMIT.
+    // Pool = manual-only (active link, not auto-email / ATS). UI caps at POOL_LIMIT.
     const poolMatches = sortMatchesByBestFit(
       matches.filter(
-        (m) => !clearedJobIds.has(m.job_id) && hasActiveJobLink(m.jobs),
+        (m) =>
+          !clearedJobIds.has(m.job_id) &&
+          hasActiveJobLink(m.jobs) &&
+          !canAutoSendJob(m.jobs),
       ),
     ).slice(0, Math.max(POOL_LIMIT, 200));
 

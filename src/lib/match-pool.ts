@@ -1,6 +1,7 @@
 import type { Job, JobMatch } from "@/lib/types";
 import { isLiveBoardSource } from "@/lib/il-boards";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
+import { canAutoSendJob } from "@/lib/web-apply";
 
 export const POOL_LIMIT = 50;
 
@@ -170,6 +171,8 @@ export function filterMatches(
   return matches.filter((m) => {
     const job = m.jobs;
     if (!hasActiveJobLink(job)) return false;
+    // Auto-sendable jobs are handled by scan/cron — pool is manual-only
+    if (canAutoSendJob(job)) return false;
     return (
       matchesKind(job, filters.kind) &&
       matchesLocation(job, filters.location) &&
