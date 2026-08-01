@@ -11,6 +11,8 @@ import {
   type MatchPoolFilters,
 } from "@/lib/match-pool";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { shouldExcludeJob } from "@/lib/matching";
+import { canAutoSendJob } from "@/lib/web-apply";
 
 function parseFilters(searchParams: URLSearchParams): MatchPoolFilters {
   const kind = (searchParams.get("kind") || "all") as MatchPoolFilters["kind"];
@@ -122,7 +124,9 @@ export async function GET(request: Request) {
         (m) =>
           !clearedJobIds.has(m.job_id) &&
           !clearedJobIds.has(m.jobs?.id || "") &&
-          hasActiveJobLink(m.jobs),
+          hasActiveJobLink(m.jobs) &&
+          !canAutoSendJob(m.jobs) &&
+          !(m.jobs && shouldExcludeJob(m.jobs)),
       ),
     );
 

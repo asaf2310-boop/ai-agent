@@ -27,17 +27,21 @@ const UA =
 
 const SEARCHES = [
   "AI",
-  "product manager",
-  "מנהל מוצר",
+  "בינה מלאכותית",
+  "machine learning",
+  "מנהל מוצר AI",
   "python",
+  "מפתח תוכנה",
   "full stack",
   "devops",
   "data scientist",
-  "finance",
+  "אנליסט",
   "פיננסים",
-  "project manager",
+  "חשב",
   "מנהל פרויקטים",
-  "machine learning",
+  "הצלחת לקוחות",
+  "שיווק דיגיטלי",
+  "דרוש ניסיון",
 ];
 
 function stripHtml(html: string): string {

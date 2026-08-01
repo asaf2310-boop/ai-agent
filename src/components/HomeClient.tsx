@@ -45,8 +45,8 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [loadingMatches, setLoadingMatches] = useState(true);
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
-  const [autoApplyBusyId, setAutoApplyBusyId] = useState<string | null>(null);
   const [dismissBusyId, setDismissBusyId] = useState<string | null>(null);
+  const [bulkDismissBusy, setBulkDismissBusy] = useState(false);
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -218,6 +218,53 @@ export function HomeClient({ email }: { email?: string | null }) {
     [resume, loadMatches, loadApplications],
   );
 
+  const bulkDismissFromPool = useCallback(
+    async (jobIds: string[]) => {
+      const ids = [...new Set(jobIds.filter(Boolean))];
+      if (!ids.length) return;
+      setBulkDismissBusy(true);
+      setMessage(null);
+
+      setDismissedJobIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.add(id);
+        return next;
+      });
+      setMatches((prev) =>
+        prev.filter(
+          (m) => !ids.includes(m.job_id) && !ids.includes(m.jobs?.id || ""),
+        ),
+      );
+
+      try {
+        const res = await fetch("/api/applications/dismiss-bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobIds: ids,
+            resumeId: resume?.id,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.ok === false) {
+          throw new Error(json.error || "מחיקה מרובה נכשלה");
+        }
+        setMessage(
+          json.detail ||
+            `הוסרו ${json.dismissed ?? ids.length} מהפול ✓ — אפשר לסרוק למשרות חדשות`,
+        );
+        void loadApplications(resume?.id, { quiet: true });
+        void loadMatches(resume?.id, { quiet: true });
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "מחיקה מרובה נכשלה");
+        void loadMatches(resume?.id, { quiet: true });
+      } finally {
+        setBulkDismissBusy(false);
+      }
+    },
+    [resume, loadMatches, loadApplications],
+  );
+
   const restoreToPool = useCallback(
     async (app: Application) => {
       setRestoreBusyId(app.id);
@@ -273,94 +320,6 @@ export function HomeClient({ email }: { email?: string | null }) {
       "המשרה נשארת בפול — מלא פרטים והגש באתר, או לחץ ״לא מעוניין״ כדי להסיר וללמד את המערכת",
     );
   }
-
-  const autoApplyFromMatch = useCallback(
-    async (match: JobMatch) => {
-      const job = match.jobs;
-      const jobId = job?.id || match.job_id;
-      if (!jobId) return;
-      setAutoApplyBusyId(jobId);
-      setMessage(null);
-      try {
-        const res = await fetch("/api/applications/auto-apply", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jobId,
-            matchId: match.id,
-            resumeId: resume?.id,
-          }),
-        });
-        const json = await res.json().catch(() => ({}));
-
-        // Real submit succeeded → history
-        if (res.ok && json.ok && json.formSubmitted !== false) {
-          setMatches((prev) =>
-            prev.filter((m) => m.job_id !== jobId && m.jobs?.id !== jobId),
-          );
-          if (json.application) {
-            setApplications((prev) => {
-              const rest = prev.filter(
-                (a) =>
-                  a.job_id !== jobId &&
-                  a.id !== json.application?.id,
-              );
-              return [json.application, ...rest];
-            });
-          }
-          setSummary((prev) => {
-            const base = prev || {
-              total: 0,
-              sent: 0,
-              opened: 0,
-              notSent: 0,
-              prepared: 0,
-              skipped: 0,
-              failed: 0,
-            };
-            if (json.alreadySent) return base;
-            return {
-              ...base,
-              total: base.total + 1,
-              sent: base.sent + 1,
-            };
-          });
-          setMessage(json.detail || "נשלח ✓ — המשרה עברה להיסטוריה");
-          setTab("history");
-          void loadApplications(resume?.id, { quiet: true });
-          void loadMatches(resume?.id, { quiet: true });
-          return;
-        }
-
-        // Could not auto-submit — keep in pool, continue with CV / site form
-        const openUrl = safeJobOpenUrl({
-          url: json.job?.url || job?.url,
-          title: json.job?.title || job?.title,
-          source: job?.source,
-          channel: job?.channel,
-          external_id: job?.external_id,
-        });
-        setAutofillJob({
-          jobId,
-          title: json.job?.title || job?.title,
-          company: json.job?.company || job?.company,
-          url: openUrl || json.job?.url || job?.url,
-          tailoredCvText: json.tailoredCv || null,
-        });
-        setTab("cv");
-        setMessage(
-          json.detail ||
-            json.error ||
-            "לא ניתן להגיש אוטומטית — המשרה בפול. כאן אפשר להמשיך לשלוח את הקו״ח.",
-        );
-      } catch (err) {
-        setMessage(err instanceof Error ? err.message : "הגשה אוטומטית נכשלה");
-      } finally {
-        setAutoApplyBusyId(null);
-      }
-    },
-    [resume, loadMatches, loadApplications],
-  );
 
   async function handleUploaded(
     next: Resume,
@@ -527,7 +486,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  רק משרות עם קישור פעיל · אוטומטי היום {autoTodayUsed}/
+                  רק משרות להגשה ידנית · אוטומטי היום {autoTodayUsed}/
                   {autoTodayQuota}
                 </p>
               </div>
@@ -558,10 +517,10 @@ export function HomeClient({ email }: { email?: string | null }) {
               onDismissFromPool={(jobId, matchId) => {
                 void markJobOpened(jobId, matchId);
               }}
+              onBulkDismiss={(jobIds) => bulkDismissFromPool(jobIds)}
               onPrepareApply={prepareApplyFromMatch}
-              onAutoApply={(m) => void autoApplyFromMatch(m)}
-              autoApplyBusyId={autoApplyBusyId}
               dismissBusyId={dismissBusyId}
+              bulkDismissBusy={bulkDismissBusy}
             />
           </section>
         )}

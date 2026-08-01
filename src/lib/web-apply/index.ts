@@ -1,3 +1,4 @@
+import { resolveEmployerEmail } from "@/lib/apply-email";
 import {
   extractCandidateProfile,
   type CandidateProfile,
@@ -28,10 +29,8 @@ export function isWebApplyEnabled(): boolean {
 }
 
 /**
- * Show «הגש אוטומטית» / allow server apply when we can POST a form
- * (known ATS or Remotive/RemoteOK/company career page).
- * Employer email is sent automatically on scan.
- * LinkedIn Easy Apply / demos → false.
+ * Server can POST a real ATS form (Greenhouse / Lever / Ashby / …).
+ * Generic career pages / LinkedIn Easy Apply → false (manual only).
  */
 export function canAutoApplyJob(job: {
   url?: string | null;
@@ -41,6 +40,21 @@ export function canAutoApplyJob(job: {
 }): boolean {
   if (!isWebApplyEnabled()) return false;
   return canAutoApplyViaAts(job);
+}
+
+/**
+ * True when the daily scan / pipeline can auto-send (employer email or ATS form).
+ * Pool UI must exclude these — only manual jobs stay in the pool.
+ */
+export function canAutoSendJob(job: {
+  url?: string | null;
+  description?: string | null;
+  apply_email?: string | null;
+  company?: string | null;
+} | null | undefined): boolean {
+  if (!job) return false;
+  if (resolveEmployerEmail(job)) return true;
+  return canAutoApplyJob(job);
 }
 
 /** Auto-fill + submit on the job's apply page when an ATS/careers URL exists. */

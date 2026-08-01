@@ -87,8 +87,8 @@ export function extractExternalApplyUrl(
 
 /**
  * Best URL to attempt automatic form submit.
- * Known ATS first; else real http career/board pages (Remotive, RemoteOK, company sites).
- * Never LinkedIn Easy Apply, social, or catalog demo boards.
+ * Only known ATS hosts (Greenhouse / Lever / Ashby / …) — never generic career
+ * pages, LinkedIn Easy Apply, social, or catalog demos (those open forms manually).
  */
 export function resolveApplyPageUrl(job: {
   url?: string | null;
@@ -98,28 +98,20 @@ export function resolveApplyPageUrl(job: {
   if (fromDesc && isKnownAtsUrl(fromDesc)) return fromDesc;
 
   const url = (job.url || "").trim();
-  if (!url || !/^https?:\/\//i.test(url)) {
-    return fromDesc && isKnownAtsUrl(fromDesc) ? fromDesc : null;
-  }
-  if (isSyntheticJobBoardUrl(url)) {
-    return fromDesc && isKnownAtsUrl(fromDesc) ? fromDesc : null;
-  }
-  if (isLinkedInOrSocialUrl(url)) {
-    return fromDesc && isKnownAtsUrl(fromDesc) ? fromDesc : null;
-  }
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  if (isSyntheticJobBoardUrl(url) || isLinkedInOrSocialUrl(url)) return null;
   if (isKnownAtsUrl(url)) return url;
-  // Remotive / RemoteOK / company career pages — try generic HTML form submit
-  if (detectAts(url) === "generic") return url;
-  return fromDesc && isKnownAtsUrl(fromDesc) ? fromDesc : null;
+  return null;
 }
 
-/** True when we can attempt server-side form POST (ATS or generic career page). */
+/** True when we can attempt a real server-side ATS form POST. */
 export function canAutoApplyViaAts(job: {
   url?: string | null;
   description?: string | null;
 }): boolean {
   const page = resolveApplyPageUrl(job);
   if (!page) return false;
-  return detectAts(page) !== "unsupported";
+  const kind = detectAts(page);
+  return kind !== "unsupported" && kind !== "generic";
 }
 
