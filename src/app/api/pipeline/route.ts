@@ -15,6 +15,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncCompanyCareerJobs,
   syncDrushimJobs,
   syncLinkedInJobs,
   syncLiveSocialJobs,
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
     await ensureSampleJobs(supabase);
     await syncLiveSocialJobs(supabase);
     await syncDrushimJobs(supabase);
+    await syncCompanyCareerJobs(supabase);
     await syncLinkedInJobs(supabase);
 
     let resumeQuery = supabase

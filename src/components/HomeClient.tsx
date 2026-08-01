@@ -442,9 +442,9 @@ export function HomeClient({ email }: { email?: string | null }) {
                 סוכן המשרות שלך בישראל
               </h1>
               <p className="max-w-md text-sm leading-relaxed text-[var(--muted)]">
-                פעמיים ביום סורק משרות שאפשר לשלוח אליהן אוטומטית (מייל או
-                טופס), משלים עד {autoTodayQuota} שליחות ביום — והכל נשמר
-                בהיסטוריה.
+                סורק LinkedIn, דרושים ואתרי קריירה של חברות טק, פיננסים
+                וסטארטאפים — מתאים לקו״ח, שולח אוטומטית עד {autoTodayQuota}{" "}
+                ביום, והכל נשמר בהיסטוריה.
               </p>
             </header>
 
