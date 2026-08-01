@@ -21,6 +21,8 @@ type Props = {
   onDismissFromPool?: (jobId: string, matchId: string) => void;
   /** Bulk remove selected job ids from the pool. */
   onBulkDismiss?: (jobIds: string[]) => void | Promise<void>;
+  /** «פתח באתר» — open URL; on return to app job moves to history. */
+  onOpenSite?: (match: JobMatch, url: string) => void;
   onPrepareApply?: (match: JobMatch) => void;
   dismissBusyId?: string | null;
   bulkDismissBusy?: boolean;
@@ -89,6 +91,7 @@ export function MatchList({
   loading,
   onDismissFromPool,
   onBulkDismiss,
+  onOpenSite,
   onPrepareApply,
   dismissBusyId = null,
   bulkDismissBusy = false,
@@ -408,7 +411,15 @@ export function MatchList({
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
                         <h3 className="text-lg font-semibold tracking-tight">
-                          {openUrl ? (
+                          {openUrl && onOpenSite ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenSite(match, openUrl)}
+                              className="text-start hover:text-[var(--accent)]"
+                            >
+                              {job?.title ?? "משרה"}
+                            </button>
+                          ) : openUrl ? (
                             <a
                               href={openUrl}
                               target="_blank"
@@ -450,14 +461,13 @@ export function MatchList({
                           מלא טופס מהקו״ח
                         </button>
                         {openUrl ? (
-                          <a
-                            href={openUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => onOpenSite?.(match, openUrl)}
                             className="inline-flex min-h-10 touch-manipulation items-center rounded-xl border border-[var(--border)] bg-white/60 px-3 py-2 text-xs font-medium"
                           >
                             פתח באתר ↗
-                          </a>
+                          </button>
                         ) : (
                           /telegram|facebook/i.test(
                             `${job?.channel || ""} ${job?.source || ""}`,
