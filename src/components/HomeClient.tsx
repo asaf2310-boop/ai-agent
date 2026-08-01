@@ -46,6 +46,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   const [loadingApps, setLoadingApps] = useState(true);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [dismissBusyId, setDismissBusyId] = useState<string | null>(null);
+  const [bulkDismissBusy, setBulkDismissBusy] = useState(false);
   const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -212,6 +213,53 @@ export function HomeClient({ email }: { email?: string | null }) {
         void loadMatches(resume?.id, { quiet: true });
       } finally {
         setDismissBusyId(null);
+      }
+    },
+    [resume, loadMatches, loadApplications],
+  );
+
+  const bulkDismissFromPool = useCallback(
+    async (jobIds: string[]) => {
+      const ids = [...new Set(jobIds.filter(Boolean))];
+      if (!ids.length) return;
+      setBulkDismissBusy(true);
+      setMessage(null);
+
+      setDismissedJobIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.add(id);
+        return next;
+      });
+      setMatches((prev) =>
+        prev.filter(
+          (m) => !ids.includes(m.job_id) && !ids.includes(m.jobs?.id || ""),
+        ),
+      );
+
+      try {
+        const res = await fetch("/api/applications/dismiss-bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jobIds: ids,
+            resumeId: resume?.id,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.ok === false) {
+          throw new Error(json.error || "מחיקה מרובה נכשלה");
+        }
+        setMessage(
+          json.detail ||
+            `הוסרו ${json.dismissed ?? ids.length} מהפול ✓ — אפשר לסרוק למשרות חדשות`,
+        );
+        void loadApplications(resume?.id, { quiet: true });
+        void loadMatches(resume?.id, { quiet: true });
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "מחיקה מרובה נכשלה");
+        void loadMatches(resume?.id, { quiet: true });
+      } finally {
+        setBulkDismissBusy(false);
       }
     },
     [resume, loadMatches, loadApplications],
@@ -469,8 +517,10 @@ export function HomeClient({ email }: { email?: string | null }) {
               onDismissFromPool={(jobId, matchId) => {
                 void markJobOpened(jobId, matchId);
               }}
+              onBulkDismiss={(jobIds) => bulkDismissFromPool(jobIds)}
               onPrepareApply={prepareApplyFromMatch}
               dismissBusyId={dismissBusyId}
+              bulkDismissBusy={bulkDismissBusy}
             />
           </section>
         )}

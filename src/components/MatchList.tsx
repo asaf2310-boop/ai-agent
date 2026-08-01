@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { JobMatch } from "@/lib/types";
 import { safeJobOpenUrl } from "@/lib/linkedin-url";
 import {
@@ -19,8 +19,11 @@ type Props = {
   loading: boolean;
   /** Explicitly remove from pool (not on mere link open). */
   onDismissFromPool?: (jobId: string, matchId: string) => void;
+  /** Bulk remove selected job ids from the pool. */
+  onBulkDismiss?: (jobIds: string[]) => void | Promise<void>;
   onPrepareApply?: (match: JobMatch) => void;
   dismissBusyId?: string | null;
+  bulkDismissBusy?: boolean;
 };
 
 function scoreLabel(score: number) {
@@ -53,6 +56,10 @@ function kindLabel(job: JobMatch["jobs"]) {
   return null;
 }
 
+function jobKey(match: JobMatch): string | null {
+  return match.jobs?.id || match.job_id || null;
+}
+
 const KIND_OPTIONS: { value: MatchPoolFilters["kind"]; label: string }[] = [
   { value: "all", label: "כל הסוגים" },
   { value: "job", label: "משרה" },
@@ -81,11 +88,14 @@ export function MatchList({
   matches,
   loading,
   onDismissFromPool,
+  onBulkDismiss,
   onPrepareApply,
   dismissBusyId = null,
+  bulkDismissBusy = false,
 }: Props) {
   const [filters, setFilters] = useState<MatchPoolFilters>(DEFAULT_POOL_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   const locations = useMemo(() => uniqueLocations(matches), [matches]);
 
@@ -99,7 +109,34 @@ export function MatchList({
     [matches, filters],
   );
 
+  const visibleIds = useMemo(
+    () =>
+      filtered
+        .map((m) => jobKey(m))
+        .filter((id): id is string => Boolean(id)),
+    [filtered],
+  );
+
+  // Drop selections that left the pool
+  useEffect(() => {
+    setSelected((prev) => {
+      if (!prev.size) return prev;
+      const alive = new Set(matches.map((m) => jobKey(m)).filter(Boolean));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (alive.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [matches]);
+
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const selectedCount = selected.size;
   const activeFilterCount = countActiveFilters(filters);
+  const selectionMode = selectedCount > 0;
 
   function updateFilter<K extends keyof MatchPoolFilters>(
     key: K,
@@ -120,6 +157,35 @@ export function MatchList({
 
   function resetFilters() {
     setFilters(DEFAULT_POOL_FILTERS);
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllVisible() {
+    setSelected(new Set(visibleIds));
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+  }
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) clearSelection();
+    else selectAllVisible();
+  }
+
+  async function deleteSelected() {
+    if (!selectedCount || !onBulkDismiss || bulkDismissBusy) return;
+    const ids = [...selected];
+    await onBulkDismiss(ids);
+    setSelected(new Set());
   }
 
   if (loading) {
@@ -270,103 +336,174 @@ export function MatchList({
           מילה אחרת.
         </p>
       ) : (
-        <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-          {filtered.map((match) => {
-            const job = match.jobs;
-            const badge = kindLabel(job);
-            const openUrl = safeJobOpenUrl({
-              url: job?.url,
-              title: job?.title,
-              source: job?.source,
-              channel: job?.channel,
-              external_id: job?.external_id,
-            });
-            const dismissId = job?.id || match.job_id;
-            const busyDismiss = Boolean(
-              dismissId && dismissBusyId === dismissId,
-            );
-            return (
-              <li key={match.id} className="relative z-0 space-y-2 py-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="text-lg font-semibold tracking-tight">
-                    {openUrl ? (
-                      <a
-                        href={openUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:text-[var(--accent)]"
-                      >
-                        {job?.title ?? "משרה"}
-                      </a>
-                    ) : (
-                      (job?.title ?? "משרה ללא כותרת")
-                    )}
-                  </h3>
-                  <span className="text-sm font-medium text-[var(--accent)]">
-                    {scoreLabel(Number(match.score))}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-[var(--muted)]">
-                  {[
-                    badge,
-                    job?.company,
-                    job?.location,
-                    `פורסם ${formatPostedLabel(job)}`,
-                    job?.channel || job?.source,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-                {match.reasons?.length > 0 && (
-                  <p className="mt-2 text-sm text-[var(--foreground)]/80">
-                    {match.reasons.join(" · ")}
-                  </p>
-                )}
-                <div className="relative z-10 mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onPrepareApply?.(match)}
-                    className="min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white"
-                  >
-                    מלא טופס מהקו״ח
-                  </button>
-                  {openUrl ? (
-                    <a
-                      href={openUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex min-h-10 touch-manipulation items-center rounded-xl border border-[var(--border)] bg-white/60 px-3 py-2 text-xs font-medium"
-                    >
-                      פתח באתר ↗
-                    </a>
-                  ) : (
-                    /telegram|facebook/i.test(
-                      `${job?.channel || ""} ${job?.source || ""}`,
-                    ) && (
-                      <span className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)]">
-                        אין קישור תקין (פוסט דמו)
-                      </span>
-                    )
-                  )}
-                </div>
-                {dismissId ? (
-                  <button
-                    type="button"
-                    disabled={busyDismiss || !onDismissFromPool}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onDismissFromPool?.(dismissId, match.id);
-                    }}
-                    className="relative z-20 mt-1 flex min-h-11 w-full touch-manipulation items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-700 disabled:opacity-50"
-                  >
-                    {busyDismiss ? "מסיר…" : "לא מעוניין — הסר מהפול"}
-                  </button>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--border)] bg-white/60 px-3 py-2.5">
+            <label className="flex min-h-10 flex-1 cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                className="size-4 accent-[var(--accent)]"
+              />
+              סמן הכל ({visibleIds.length})
+            </label>
+            {selectionMode && (
+              <>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="min-h-10 rounded-xl border border-[var(--border)] bg-white/80 px-3 py-2 text-xs font-medium"
+                >
+                  נקה בחירה
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkDismissBusy || !onBulkDismiss}
+                  onClick={() => void deleteSelected()}
+                  className="min-h-10 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 disabled:opacity-50"
+                >
+                  {bulkDismissBusy
+                    ? "מוחק…"
+                    : `מחק נבחרים (${selectedCount})`}
+                </button>
+              </>
+            )}
+          </div>
+
+          <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+            {filtered.map((match) => {
+              const job = match.jobs;
+              const badge = kindLabel(job);
+              const openUrl = safeJobOpenUrl({
+                url: job?.url,
+                title: job?.title,
+                source: job?.source,
+                channel: job?.channel,
+                external_id: job?.external_id,
+              });
+              const dismissId = jobKey(match);
+              const busyDismiss = Boolean(
+                dismissId && dismissBusyId === dismissId,
+              );
+              const isChecked = Boolean(dismissId && selected.has(dismissId));
+              return (
+                <li
+                  key={match.id}
+                  className={`relative z-0 space-y-2 py-4 ${
+                    isChecked ? "bg-[var(--accent)]/5" : ""
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    {dismissId ? (
+                      <label className="mt-1 flex min-h-10 min-w-10 touch-manipulation cursor-pointer items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleOne(dismissId)}
+                          className="size-4 accent-[var(--accent)]"
+                          aria-label={`בחר ${job?.title || "משרה"}`}
+                        />
+                      </label>
+                    ) : null}
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <h3 className="text-lg font-semibold tracking-tight">
+                          {openUrl ? (
+                            <a
+                              href={openUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="hover:text-[var(--accent)]"
+                            >
+                              {job?.title ?? "משרה"}
+                            </a>
+                          ) : (
+                            (job?.title ?? "משרה ללא כותרת")
+                          )}
+                        </h3>
+                        <span className="text-sm font-medium text-[var(--accent)]">
+                          {scoreLabel(Number(match.score))}
+                        </span>
+                      </div>
+                      <p className="text-sm text-[var(--muted)]">
+                        {[
+                          badge,
+                          job?.company,
+                          job?.location,
+                          `פורסם ${formatPostedLabel(job)}`,
+                          job?.channel || job?.source,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      {match.reasons?.length > 0 && (
+                        <p className="text-sm text-[var(--foreground)]/80">
+                          {match.reasons.join(" · ")}
+                        </p>
+                      )}
+                      <div className="relative z-10 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onPrepareApply?.(match)}
+                          className="min-h-10 touch-manipulation rounded-xl bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white"
+                        >
+                          מלא טופס מהקו״ח
+                        </button>
+                        {openUrl ? (
+                          <a
+                            href={openUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex min-h-10 touch-manipulation items-center rounded-xl border border-[var(--border)] bg-white/60 px-3 py-2 text-xs font-medium"
+                          >
+                            פתח באתר ↗
+                          </a>
+                        ) : (
+                          /telegram|facebook/i.test(
+                            `${job?.channel || ""} ${job?.source || ""}`,
+                          ) && (
+                            <span className="rounded-xl px-3 py-1.5 text-xs text-[var(--muted)]">
+                              אין קישור תקין (פוסט דמו)
+                            </span>
+                          )
+                        )}
+                      </div>
+                      {dismissId && !selectionMode ? (
+                        <button
+                          type="button"
+                          disabled={busyDismiss || !onDismissFromPool}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onDismissFromPool?.(dismissId, match.id);
+                          }}
+                          className="relative z-20 flex min-h-11 w-full touch-manipulation items-center justify-center rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-700 disabled:opacity-50"
+                        >
+                          {busyDismiss ? "מסיר…" : "לא מעוניין — הסר מהפול"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {selectionMode ? (
+            <div className="sticky bottom-20 z-30 rounded-2xl border border-red-200 bg-red-50/95 p-3 shadow-sm backdrop-blur">
+              <button
+                type="button"
+                disabled={bulkDismissBusy || !onBulkDismiss}
+                onClick={() => void deleteSelected()}
+                className="flex min-h-12 w-full touch-manipulation items-center justify-center rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {bulkDismissBusy
+                  ? "מוחק מהפול…"
+                  : `מחק ${selectedCount} מהפול — פנה מקום למשרות חדשות`}
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );

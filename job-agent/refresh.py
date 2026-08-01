@@ -89,6 +89,39 @@ DOMAIN_TERMS = [
 DOMAIN_TAGS = {"ai", "product", "finance", "management", "marketing", "sales", "tech"}
 
 
+_PM_TITLE_RE = re.compile(
+    r"(?:ai\s+)?product\s*managers?|(?:ai\s+)?product\s*owners?|"
+    r"associate\s*product\s*manager|technical\s*product\s*manager|"
+    r"group\s*product\s*manager|growth\s*product\s*manager|"
+    r"platform\s*product\s*manager|head of product|vp\s*product|"
+    r"מנהל(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b",
+    re.I,
+)
+_AI_DOMAIN_RE = re.compile(
+    r"\b(?:ai|a\.i\.|llm|llms|gen(?:erative)?\s*ai|machine\s*learning|\bml\b|"
+    r"nlp|deep\s*learning|בינה\s*מלאכותית|למידת\s*מכונה)\b",
+    re.I,
+)
+_HEBREW_RE = re.compile(r"[\u0590-\u05FF]")
+_LETTER_RE = re.compile(r"[A-Za-z\u0590-\u05FF]")
+
+
+def _should_exclude_job(job: dict[str, Any]) -> bool:
+    """Skip generic Product Manager roles; keep AI/ML product roles."""
+    title = job.get("title") or ""
+    if not _PM_TITLE_RE.search(title):
+        return False
+    blob = f"{title} {job.get('description') or ''}"
+    return _AI_DOMAIN_RE.search(blob) is None
+
+
+def _hebrew_ratio(text: str) -> float:
+    letters = _LETTER_RE.findall(text or "")
+    if not letters:
+        return 0.0
+    return len(_HEBREW_RE.findall(text or "")) / len(letters)
+
+
 def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tuple[float, list[str]]:
     haystack = " ".join(
         filter(
@@ -133,6 +166,20 @@ def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tup
         score = 0.32
     if tag_hits and domain_hits and score < 0.38:
         score = 0.38
+
+    desc = job.get("description") or ""
+    title = job.get("title") or ""
+    hebrew_ok = (
+        _hebrew_ratio(desc) >= 0.25
+        if len(desc.strip()) >= 40
+        else _hebrew_ratio(f"{title} {desc}") >= 0.35
+    )
+    if hebrew_ok:
+        score = min(1.0, round(score + 0.08, 4))
+        reasons.append("דרישות בעברית")
+    else:
+        score = max(0.0, round(score - 0.03, 4))
+
     if not reasons:
         reasons.append("partial profile overlap" if score > 0 else "weak lexical overlap")
     return score, reasons
@@ -156,6 +203,8 @@ def refresh_matches(client: Client, min_score: float, max_age_days: int) -> list
         skills = resume.get("skills") or []
         rows = []
         for job in jobs:
+            if _should_exclude_job(job):
+                continue
             score, reasons = score_match(resume_text, skills, job)
             if score < min_score:
                 continue

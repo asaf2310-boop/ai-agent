@@ -6,6 +6,15 @@ import {
   type Seniority,
 } from "@/lib/resume-extract";
 
+/** Classic PM / PO titles (not every job that mentions "product"). */
+const PRODUCT_MANAGER_TITLE_RE =
+  /\b(?:ai\s+)?product\s*managers?\b|\b(?:ai\s+)?product\s*owners?\b|\bassociate\s*product\s*manager\b|\btechnical\s*product\s*manager\b|\bgroup\s*product\s*manager\b|\bgrowth\s*product\s*manager\b|\bplatform\s*product\s*manager\b|\bhead of product\b|\bvp\s*product\b|מנהל(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b/i;
+
+const AI_DOMAIN_RE =
+  /\b(?:ai|a\.i\.|llm|llms|gen(?:erative)?\s*ai|machine\s*learning|\bml\b|nlp|deep\s*learning|בינה\s*מלאכותית|למידת\s*מכונה)\b/i;
+
+const HEBREW_CHAR_RE = /[\u0590-\u05FF]/g;
+
 const STOPWORDS = new Set([
   "the",
   "and",
@@ -142,6 +151,53 @@ export function tokenize(text: string): Set<string> {
   return new Set(
     tokens.filter((t) => t.length > 2 && !STOPWORDS.has(t) && !/^\d+$/.test(t)),
   );
+}
+
+/** Job title looks like Product Manager / Product Owner / מנהל מוצר. */
+export function isProductManagerTitle(title: string | null | undefined): boolean {
+  if (!title) return false;
+  return PRODUCT_MANAGER_TITLE_RE.test(title);
+}
+
+/** Job is clearly AI / ML / LLM related (title or description). */
+export function isAiRelatedJob(job: {
+  title?: string | null;
+  description?: string | null;
+}): boolean {
+  return AI_DOMAIN_RE.test(`${job.title || ""} ${job.description || ""}`);
+}
+
+/**
+ * Soft-block: never surface generic Product Manager roles.
+ * AI Product Manager / PM for AI products are allowed.
+ */
+export function shouldExcludeJob(job: {
+  title?: string | null;
+  description?: string | null;
+}): boolean {
+  if (!isProductManagerTitle(job.title)) return false;
+  return !isAiRelatedJob(job);
+}
+
+/** Share of letters in text that are Hebrew (0–1). */
+export function hebrewTextRatio(text: string | null | undefined): number {
+  if (!text) return 0;
+  const letters = text.match(/[A-Za-z\u0590-\u05FF]/g);
+  if (!letters?.length) return 0;
+  const hebrew = text.match(HEBREW_CHAR_RE)?.length || 0;
+  return hebrew / letters.length;
+}
+
+/** True when job requirements / description are meaningfully in Hebrew. */
+export function hasHebrewRequirements(job: {
+  title?: string | null;
+  description?: string | null;
+}): boolean {
+  const desc = job.description || "";
+  const title = job.title || "";
+  // Prefer description; fall back to Hebrew title
+  if (desc.trim().length >= 40) return hebrewTextRatio(desc) >= 0.25;
+  return hebrewTextRatio(`${title} ${desc}`) >= 0.35;
 }
 
 export function detectJobFamilies(haystack: string): RoleFamily[] {
@@ -360,6 +416,15 @@ export function scoreMatch(
   // Tiny lexical-only matches shouldn't surface as "good"
   if (!shared.length && skillHits.length === 0 && titleHits.length < 2) {
     score = Math.min(score, 0.22);
+  }
+
+  // Prefer postings whose requirements are written in Hebrew
+  if (hasHebrewRequirements(job)) {
+    score = Math.min(1, Number((score + 0.08).toFixed(4)));
+    reasons.push("דרישות בעברית");
+  } else {
+    // Slightly demote English-only JDs so Hebrew ones rise in the pool
+    score = Math.max(0, Number((score - 0.03).toFixed(4)));
   }
 
   if (!reasons.length) {

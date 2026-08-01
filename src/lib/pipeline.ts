@@ -29,7 +29,7 @@ import {
   applyRejectionPreference,
   loadRejectionProfile,
 } from "@/lib/job-preferences";
-import { scoreMatch } from "@/lib/matching";
+import { scoreMatch, shouldExcludeJob } from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Job, JobMatch, Resume } from "@/lib/types";
@@ -374,6 +374,9 @@ export async function matchResumeToJobs(
 
   const matchRows = [];
   for (const job of israelJobs) {
+    // No generic Product Manager — only AI/ML product roles
+    if (shouldExcludeJob(job)) continue;
+
     const base = scoreMatch(
       resumeText,
       resume.skills || [],

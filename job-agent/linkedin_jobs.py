@@ -18,11 +18,12 @@ ISRAEL_GEO = "101620260"
 PAST_WEEK = "r604800"
 
 SEARCHES = [
-    'AI OR LLM OR "machine learning" OR "data scientist"',
-    '"product manager" OR "product owner" OR "product analyst"',
-    "finance OR fintech OR FP&A OR controller OR \"financial analyst\"",
+    'AI OR LLM OR "machine learning" OR "data scientist" OR "בינה מלאכותית"',
+    '"AI product manager" OR "AI product owner" OR "product manager AI" OR "LLM product"',
+    "מפתח OR \"מנהל פרויקטים\" OR אנליסט OR חשב OR \"הצלחת לקוחות\"",
+    'finance OR fintech OR FP&A OR controller OR "financial analyst" OR פיננסים',
     '"project manager" OR "operations manager" OR "team lead" OR management',
-    '"full stack" OR "software engineer" OR devops OR backend OR react',
+    '"full stack" OR "software engineer" OR devops OR backend OR react OR "מפתח תוכנה"',
 ]
 
 RELEVANT = re.compile(
