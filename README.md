@@ -72,6 +72,7 @@ Optional: `GROQ_API_KEY`, `RESEND_API_KEY`, `APPLICATION_NOTIFY_EMAIL`, `SOCIAL_
 2. Upload CV → owned by your user id.
 3. Match / tailor / apply scoped to your data.
 4. Twice daily (`05:00` / `17:00` UTC ≈ morning & evening Israel): GitHub Actions + Vercel Cron call `/api/cron/auto-apply`, which syncs jobs and auto-sends (email or web-form) up to **20 successful applications per user per Israel day**. Only real sends appear in History.
+5. Job sources: LinkedIn, Drushim, Remotive/RemoteOK, plus **company career boards** (Greenhouse / Lever / Ashby) for Israel tech, finance, cyber, and startups — matched to your CV.
 
 ### Cron secrets
 

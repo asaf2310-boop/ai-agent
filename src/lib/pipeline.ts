@@ -21,6 +21,7 @@ import {
   isBrokenLinkedInUrl,
   safeJobOpenUrl,
 } from "@/lib/linkedin-url";
+import { fetchCompanyCareerJobs } from "@/lib/company-careers";
 import { fetchDrushimIsraelJobs } from "@/lib/drushim-jobs";
 import { isFakeIlBoardUrl } from "@/lib/il-boards";
 import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
@@ -91,8 +92,20 @@ async function upsertJobBatch(
 
 export async function ensureSampleJobs(supabase: DbClient) {
   // Catalog demos have null / fake URLs — do not seed them into the pool.
-  // Live sources (LinkedIn, Drushim, Remotive, RemoteOK) are synced separately.
+  // Live sources (LinkedIn, Drushim, company careers, Remotive, RemoteOK) sync separately.
   await repairBrokenLinkedInUrls(supabase);
+}
+
+/** Company career pages (Greenhouse / Lever / Ashby) — tech, finance, startups. */
+export async function syncCompanyCareerJobs(supabase: DbClient) {
+  const jobs = await fetchCompanyCareerJobs({ maxJobs: 200 });
+  if (jobs.length) {
+    await upsertJobBatch(
+      supabase,
+      jobs.map((j) => ({ ...j })),
+    );
+  }
+  return jobs.length;
 }
 
 /** Fix broken LinkedIn / Telegram / Facebook / fake IL board links. */

@@ -6,6 +6,7 @@ import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
+  syncCompanyCareerJobs,
   syncDrushimJobs,
   syncLinkedInJobs,
   syncLiveSocialJobs,
@@ -36,6 +37,7 @@ async function runAutoApplyCron() {
   await ensureSampleJobs(supabase);
   await syncLiveSocialJobs(supabase);
   await syncDrushimJobs(supabase);
+  await syncCompanyCareerJobs(supabase);
   await syncLinkedInJobs(supabase);
 
   const { data: resumes, error } = await supabase

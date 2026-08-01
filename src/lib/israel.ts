@@ -39,8 +39,13 @@ const ISRAEL_POSITIVE = [
   "israel / remote",
   "il remote",
   "worldwide · israel",
-  ", il",
   " israel",
+  "tel aviv-yafo",
+  "tel aviv yafo",
+  // Ashby / ATS shorthand for Tel Aviv
+  " tlv",
+  "tlv,",
+  "tlv ",
 ];
 
 const ISRAEL_NEGATIVE = [
@@ -72,11 +77,22 @@ export function isIsraelLocation(
   description?: string | null,
   company?: string | null,
 ): boolean {
+  const loc = (location || "").trim().toLowerCase();
+  // Bare ATS codes (Ashby etc.)
+  if (loc === "tlv" || loc === "il") return true;
+
   const blob = `${location || ""} ${description || ""} ${company || ""}`.toLowerCase();
   if (!blob.trim()) return false;
 
+  // Country code "IL" / ", IL" — but never "Illinois"
+  const hasIlCountryCode =
+    /(^|,\s*)il(\s|,|$)/i.test(blob) && !/illinois/i.test(blob);
+
   // Explicit non-IL geo without Israel mention → reject
-  const hasIsrael = ISRAEL_POSITIVE.some((p) => blob.includes(p));
+  const hasIsrael =
+    ISRAEL_POSITIVE.some((p) => blob.includes(p)) ||
+    hasIlCountryCode ||
+    /(^|[^a-z])tlv([^a-z]|$)/i.test(blob);
   if (hasIsrael) return true;
 
   // Pure "Remote" / Worldwide without Israel → reject for this product
