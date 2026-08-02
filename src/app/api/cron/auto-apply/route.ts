@@ -4,7 +4,7 @@ import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
-  matchResumeToJobs,
+  matchResumeForAutoApply,
   processApplicationsForResume,
   syncCompanyCareerJobs,
   syncDrushimJobs,
@@ -21,10 +21,8 @@ function authorizeCron(request: Request): boolean {
   if (!secret) return false;
   const auth = request.headers.get("authorization") || "";
   if (auth === `Bearer ${secret}`) return true;
-  // Some Vercel setups forward the secret in a dedicated header
   const vercel = request.headers.get("x-vercel-cron-secret") || "";
   if (vercel === secret) return true;
-  // Query param fallback for manual ops: /api/cron/auto-apply?secret=...
   try {
     const url = new URL(request.url);
     if (url.searchParams.get("secret") === secret) return true;
@@ -36,16 +34,21 @@ function authorizeCron(request: Request): boolean {
 
 /**
  * Twice-daily (and on-demand) auto-apply for all users with an active resume.
- * Fills up to DAILY_AUTO_APPLY_QUOTA (default 20) successful sends per user / Israel day.
- * Successful sends are persisted to applications history (job-email / web-form).
+ * Each run targets up to AUTO_APPLY_PER_RUN (default 20) successful sends
+ * (email or ATS web-form) into History.
  */
 async function runAutoApplyCron() {
   const supabase = createAdminClient();
+  const targetSent = Math.min(
+    Number(process.env.AUTO_APPLY_PER_RUN || "20"),
+    40,
+  );
 
   await ensureSampleJobs(supabase);
+  // Company ATS boards first — these are what we can actually auto-submit
+  const careersSynced = await syncCompanyCareerJobs(supabase);
   await syncLiveSocialJobs(supabase);
   await syncDrushimJobs(supabase);
-  await syncCompanyCareerJobs(supabase);
   await syncLinkedInJobs(supabase);
 
   const { data: resumes, error } = await supabase
@@ -59,7 +62,6 @@ async function runAutoApplyCron() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // One active resume per user (newest first already)
   const byUser = new Map<string, Resume>();
   for (const row of resumes || []) {
     const r = row as Resume;
@@ -67,42 +69,69 @@ async function runAutoApplyCron() {
     if (!byUser.has(r.user_id)) byUser.set(r.user_id, r);
   }
 
+  const resendConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
+
   const results: Array<{
     userId: string;
     resumeId: string;
     quotaUsedBefore: number;
     quotaRemainingBefore: number;
     sentThisRun: number;
-    matches: number;
+    candidates: number;
+    skippedNoResend: number;
+    skippedWebFailed: number;
+    skippedManual: number;
   }> = [];
 
   for (const [userId, resume] of byUser) {
     const usage = await getDailyAutoApplyUsage(supabase, userId);
-    if (usage.remaining <= 0) {
-      results.push({
-        userId,
-        resumeId: resume.id,
-        quotaUsedBefore: usage.used,
-        quotaRemainingBefore: 0,
-        sentThisRun: 0,
-        matches: 0,
-      });
-      continue;
+
+    // Resolve candidate email for Reply-To when possible
+    let candidateEmail: string | null = null;
+    try {
+      const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+      candidateEmail = authUser.user?.email || null;
+    } catch {
+      // optional
     }
 
-    const matches = await matchResumeToJobs(
+    const candidates = await matchResumeForAutoApply(
       supabase,
       resume,
-      undefined,
       userId,
+      Math.max(targetSent * 4, 60),
     );
+
     const applications = await processApplicationsForResume(
       supabase,
       resume,
-      matches,
+      candidates,
       userId,
-      null,
+      candidateEmail,
+      {
+        targetSent,
+        autoSendableOnly: true,
+        // Still respect daily quota for cron, but target a full batch when possible
+        respectDailyQuota: true,
+      },
     );
+
+    let skippedNoResend = 0;
+    let skippedWebFailed = 0;
+    let skippedManual = 0;
+    for (const a of applications as Array<{
+      status?: string;
+      method?: string | null;
+    }>) {
+      if (a.status === "sent") continue;
+      if (a.method === "no-resend") skippedNoResend += 1;
+      else if (a.method === "no-web-form" || a.method === "link-only") {
+        skippedWebFailed += 1;
+      } else if (a.method === "manual-only" || a.method === "no-email") {
+        skippedManual += 1;
+      }
+    }
+
     const sentThisRun = applications.filter((a) =>
       wasSentToEmployer(a as { status: string; method?: string | null }),
     ).length;
@@ -113,15 +142,31 @@ async function runAutoApplyCron() {
       quotaUsedBefore: usage.used,
       quotaRemainingBefore: usage.remaining,
       sentThisRun,
-      matches: matches.length,
+      candidates: candidates.length,
+      skippedNoResend,
+      skippedWebFailed,
+      skippedManual,
     });
   }
 
   const totalSent = results.reduce((n, r) => n + r.sentThisRun, 0);
+  const totalCandidates = results.reduce((n, r) => n + r.candidates, 0);
+
   return NextResponse.json({
     ok: true,
     usersProcessed: results.length,
     totalSent,
+    totalCandidates,
+    careersSynced,
+    targetSent,
+    resendConfigured,
+    hint: !resendConfigured
+      ? "RESEND_API_KEY missing on Vercel — relying on ATS web-form only"
+      : totalSent === 0 && totalCandidates === 0
+        ? "No auto-sendable matches (email/ATS) for active resumes"
+        : totalSent === 0
+          ? "Candidates found but email/web-form submits did not succeed"
+          : undefined,
     results,
   });
 }

@@ -6,9 +6,17 @@ import {
   type Seniority,
 } from "@/lib/resume-extract";
 
-/** Classic PM / PO titles (not every job that mentions "product"). */
+/** Classic Product Manager / Product Owner titles (not every "product" mention). */
 const PRODUCT_MANAGER_TITLE_RE =
   /\b(?:ai\s+)?product\s*managers?\b|\b(?:ai\s+)?product\s*owners?\b|\bassociate\s*product\s*manager\b|\btechnical\s*product\s*manager\b|\bgroup\s*product\s*manager\b|\bgrowth\s*product\s*manager\b|\bplatform\s*product\s*manager\b|\bhead of product\b|\bvp\s*product\b|מנהל(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b/i;
+
+/** Software developer / engineer / programmer titles — never enter the pool. */
+const DEVELOPER_TITLE_RE =
+  /\b(?:software|frontend|front.?end|backend|back.?end|full.?stack|fullstack|mobile|android|ios|devops|sre|platform|cloud|qa|automation|integration)\s*(?:engineer|developer|programmer)s?\b|\b(?:engineer|developer|programmer)s?\s*(?:software|frontend|backend|full.?stack|fullstack)\b|\b(?:react|angular|vue|node\.?js|java|golang|\.net|php|ruby)\s*(?:developer|engineer)s?\b|\bsalesforce\s*developer\b|\bמפתח(?:ת)?(?:\s|$)|מפתח(?:ת)?\s+(?:תוכנה|full.?stack|frontend|backend|fullstack|mobile|אינטגרציה|אוטומציה)|מהנדס(?:ת)?\s*תוכנה|\bprogrammer\b|\bsoftware\s*development\b/i;
+
+/** Project / program / delivery manager titles — never enter the pool. */
+const PROJECT_MANAGER_TITLE_RE =
+  /\b(?:ai\s+)?project\s*managers?\b|\bprogram\s*managers?\b|\bdelivery\s*managers?\b|\bimplementation\s*managers?\b|\bפרויקט(?:ים)?\b.*\bמנהל(?:ת)?\b|\bמנהל(?:ת)?\s*פרויקט(?:ים)?\b|\bמנהל(?:ת)?\s*תכניות\b/i;
 
 const AI_DOMAIN_RE =
   /\b(?:ai|a\.i\.|llm|llms|gen(?:erative)?\s*ai|machine\s*learning|\bml\b|nlp|deep\s*learning|בינה\s*מלאכותית|למידת\s*מכונה)\b/i;
@@ -159,6 +167,27 @@ export function isProductManagerTitle(title: string | null | undefined): boolean
   return PRODUCT_MANAGER_TITLE_RE.test(title);
 }
 
+/** Job title is a software developer / engineer / מפתח role. */
+export function isDeveloperTitle(title: string | null | undefined): boolean {
+  if (!title) return false;
+  // Don't treat "AI Product Manager" / non-coding roles as developers
+  if (isProductManagerTitle(title) || isProjectManagerTitle(title)) return false;
+  if (/product\s*(?:manager|owner|analyst)|מנהל(?:ת)?\s*מוצר|data\s*scientist|data\s*analyst/i.test(title)) {
+    return false;
+  }
+  return DEVELOPER_TITLE_RE.test(title);
+}
+
+/** Job title is Project / Program / Delivery Manager / מנהל פרויקט. */
+export function isProjectManagerTitle(title: string | null | undefined): boolean {
+  if (!title) return false;
+  // Product Manager ≠ Project Manager
+  if (PRODUCT_MANAGER_TITLE_RE.test(title) && !/project\s*manager|מנהל(?:ת)?\s*פרויקט/i.test(title)) {
+    return false;
+  }
+  return PROJECT_MANAGER_TITLE_RE.test(title);
+}
+
 /** Job is clearly AI / ML / LLM related (title or description). */
 export function isAiRelatedJob(job: {
   title?: string | null;
@@ -168,15 +197,42 @@ export function isAiRelatedJob(job: {
 }
 
 /**
- * Soft-block: never surface generic Product Manager roles.
- * AI Product Manager / PM for AI products are allowed.
+ * Hard filters for the pool / matching:
+ * - No software developer / engineer / מפתח roles
+ * - No project / program / delivery managers
+ * - No generic Product Manager (AI Product Manager is allowed)
  */
 export function shouldExcludeJob(job: {
   title?: string | null;
   description?: string | null;
 }): boolean {
-  if (!isProductManagerTitle(job.title)) return false;
-  return !isAiRelatedJob(job);
+  const title = job.title || "";
+  if (isDeveloperTitle(title)) return true;
+  if (isProjectManagerTitle(title)) return true;
+  if (isProductManagerTitle(title) && !isAiRelatedJob(job)) return true;
+  return false;
+}
+
+/**
+ * True when the job's title role-family clearly doesn't fit the CV profile.
+ * Used to keep the pool aligned with the uploaded resume.
+ */
+export function isFamilyMismatchForResume(
+  job: { title?: string | null; description?: string | null },
+  signals: ResumeSignals,
+): boolean {
+  if (!signals.families.length) return false;
+  // Prefer title so JD noise ("work with engineers") doesn't mis-tag the role
+  const titleFamilies = detectJobFamilies(job.title || "");
+  const jobFamilies =
+    titleFamilies.length > 0
+      ? titleFamilies
+      : detectJobFamilies(
+          `${job.title || ""} ${job.description || ""}`.slice(0, 800),
+        );
+  if (!jobFamilies.length) return false;
+  const shared = jobFamilies.filter((f) => signals.families.includes(f));
+  return shared.length === 0;
 }
 
 /** Share of letters in text that are Hebrew (0–1). */
@@ -289,7 +345,7 @@ export function scoreMatch(
   skills: string[],
   job: Pick<Job, "title" | "description" | "company" | "location">,
   signals?: ResumeSignals,
-): { score: number; reasons: string[] } {
+): { score: number; reasons: string[]; reject?: boolean } {
   const profile =
     signals || extractResumeSignals(resumeText, skills);
   const haystack = [job.title, job.description, job.company, job.location]
@@ -299,7 +355,13 @@ export function scoreMatch(
   const titleLower = (job.title || "").toLowerCase();
   const reasons: string[] = [];
 
-  const jobFamilies = detectJobFamilies(`${titleLower} ${haystack}`);
+  // Title families first — description often mentions engineers/PMs as collaborators
+  const titleFamilies = detectJobFamilies(titleLower);
+  const jobFamilies =
+    titleFamilies.length > 0
+      ? titleFamilies
+      : detectJobFamilies(`${titleLower} ${haystack}`.slice(0, 900));
+
   const { score: roleScore, shared } = familyOverlapScore(
     profile.families,
     jobFamilies,
@@ -310,6 +372,21 @@ export function scoreMatch(
     );
   } else if (profile.families.length && jobFamilies.length) {
     reasons.push("תפקיד שונה מהפרופיל בקו״ח");
+  }
+
+  // Boost when job title echoes titles inferred from the CV
+  const resumeTitleBlob = profile.titles.join(" ").toLowerCase();
+  let cvTitleBoost = 0;
+  if (resumeTitleBlob) {
+    const titleOverlap = [...tokenize(job.title || "")].filter((t) =>
+      resumeTitleBlob.includes(t),
+    );
+    if (titleOverlap.length >= 2) {
+      cvTitleBoost = 0.1;
+      reasons.push(`כותרת דומה לקו״ח: ${titleOverlap.slice(0, 3).join(", ")}`);
+    } else if (titleOverlap.length === 1) {
+      cvTitleBoost = 0.04;
+    }
   }
 
   const skillList = concreteSkills(profile.skills);
@@ -382,13 +459,14 @@ export function scoreMatch(
   // Role fit dominates — wrong-family jobs stay low even if "ai" tag matches
   let score = Number(
     (
-      0.38 * roleScore +
-      0.22 * skillScore +
+      0.42 * roleScore +
+      0.2 * skillScore +
       0.12 * domainScore +
-      0.1 * overlapScore +
+      0.08 * overlapScore +
       0.1 * titleScore +
       0.05 * senScore +
-      0.03 * expScore
+      0.03 * expScore +
+      cvTitleBoost
     ).toFixed(4),
   );
 

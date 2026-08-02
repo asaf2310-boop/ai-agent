@@ -39,11 +39,21 @@ jobs:
             echo "::error::Cron auto-apply failed (HTTP ${HTTP_CODE}). Check CRON_SECRET / APP_URL / Vercel logs."
             exit 1
           fi
-          TOTAL_SENT=$(python3 -c "import json; print(json.load(open('/tmp/cron-result.json')).get('totalSent', 0))" 2>/dev/null || echo 0)
-          echo "totalSent=${TOTAL_SENT}"
-          if [ "${TOTAL_SENT}" = "0" ]; then
-            echo "::warning::Cron finished with 0 sends. History stays empty until RESEND_API_KEY (email) or web-form apply succeeds on Vercel."
-          fi
+          python3 - <<'PY'
+          import json
+          d=json.load(open("/tmp/cron-result.json"))
+          print(f"totalSent={d.get('totalSent',0)} candidates={d.get('totalCandidates',0)} careersSynced={d.get('careersSynced',0)} resendConfigured={d.get('resendConfigured')}")
+          if d.get("hint"):
+              print(f"hint: {d['hint']}")
+          for r in d.get("results") or []:
+              print(
+                  f" user={r.get('userId','')[:8]}… sent={r.get('sentThisRun')} "
+                  f"candidates={r.get('candidates')} noResend={r.get('skippedNoResend')} "
+                  f"webFail={r.get('skippedWebFailed')} manual={r.get('skippedManual')}"
+              )
+          if int(d.get("totalSent") or 0) == 0:
+              print("::warning::Cron finished with 0 sends. Set RESEND_API_KEY on Vercel for email, and ensure company ATS boards sync.")
+          PY
 
   # Scrape into Supabase (LinkedIn/social/catalog). Email apply only when Resend is configured;
   # never writes skipped rows into History.

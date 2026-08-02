@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  wasSentToEmployer,
   wasSentToRealEmployer,
   isClearedFromPool,
   isHistoryEntry,
@@ -13,6 +14,7 @@ import { hasActiveJobLink } from "@/lib/linkedin-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ensureSampleJobs,
+  matchResumeForAutoApply,
   matchResumeToJobs,
   processApplicationsForResume,
   syncCompanyCareerJobs,
@@ -35,9 +37,10 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
     await ensureSampleJobs(supabase);
+    // ATS company boards first — needed for real auto-send
+    await syncCompanyCareerJobs(supabase);
     await syncLiveSocialJobs(supabase);
     await syncDrushimJobs(supabase);
-    await syncCompanyCareerJobs(supabase);
     await syncLinkedInJobs(supabase);
 
     let resumeQuery = supabase
@@ -82,22 +85,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    // Home button: hunt auto-sendable jobs (email / ATS) and send up to 20
+    const autoCandidates = await matchResumeForAutoApply(
+      supabase,
+      resume,
+      user.id,
+      80,
+    );
+    const autoApplications = await processApplicationsForResume(
+      supabase,
+      resume,
+      autoCandidates,
+      user.id,
+      user.email,
+      {
+        targetSent: Number(process.env.AUTO_APPLY_PER_RUN || "20"),
+        autoSendableOnly: true,
+        respectDailyQuota: false,
+      },
+    );
+
+    // Also refresh pool matches (manual-only jobs for the pool UI)
     const matches = await matchResumeToJobs(
       supabase,
       resume,
       undefined,
       user.id,
     );
-    const applications = await processApplicationsForResume(
-      supabase,
-      resume,
-      matches,
-      user.id,
-      user.email,
-    );
 
-    const appRows = applications as Application[];
-    const sentCount = appRows.filter((a) => wasSentToRealEmployer(a)).length;
+    const appRows = autoApplications as Application[];
+    const sentCount = appRows.filter((a) =>
+      wasSentToEmployer(a as { status: string; method?: string | null }),
+    ).length;
 
     // Also exclude previously cleared jobs (sent / link-opened) from pool
     const { data: allApps } = await supabase
@@ -177,6 +196,8 @@ export async function POST(request: Request) {
       matchesCount: poolMatches.length,
       applicationsCount: historyApps.length,
       sentCount,
+      autoCandidates: autoCandidates.length,
+      resendConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
       notSentCount: 0,
       openedCount: normalizedApps.filter((a) => a.method === "link-opened").length,
       dailyQuota,

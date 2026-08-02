@@ -19,17 +19,16 @@ PAST_WEEK = "r604800"
 
 SEARCHES = [
     'AI OR LLM OR "machine learning" OR "data scientist" OR "בינה מלאכותית"',
-    '"AI product manager" OR "AI product owner" OR "product manager AI" OR "LLM product"',
-    "מפתח OR \"מנהל פרויקטים\" OR אנליסט OR חשב OR \"הצלחת לקוחות\"",
+    '"AI product manager" OR "AI product owner" OR "product manager AI" OR "LLM product" OR "מנהל מוצר AI"',
+    "אנליסט OR חשב OR \"הצלחת לקוחות\" OR שיווק OR \"product analyst\"",
     'finance OR fintech OR FP&A OR controller OR "financial analyst" OR פיננסים',
-    '"project manager" OR "operations manager" OR "team lead" OR management',
-    '"full stack" OR "software engineer" OR devops OR backend OR react OR "מפתח תוכנה"',
+    '"product owner" OR "product marketing" OR "customer success" OR operations',
 ]
 
 RELEVANT = re.compile(
-    r"ai|llm|machine learning|data|product|finance|fintech|fp&a|controller|"
-    r"management|manager|operations|engineer|developer|devops|analyst|"
-    r"marketing|sales|customer success|מוצר|פיננס|ניהול|מנהל|בינה",
+    r"ai|llm|machine learning|data scientist|data analyst|product|finance|fintech|"
+    r"fp&a|controller|analyst|marketing|sales|customer success|"
+    r"מוצר|פיננס|בינה|שיווק|מכירות|אנליסט",
     re.I,
 )
 

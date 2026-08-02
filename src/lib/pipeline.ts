@@ -29,11 +29,29 @@ import {
   applyRejectionPreference,
   loadRejectionProfile,
 } from "@/lib/job-preferences";
-import { scoreMatch, shouldExcludeJob } from "@/lib/matching";
+import {
+  isFamilyMismatchForResume,
+  scoreMatch,
+  shouldExcludeJob,
+} from "@/lib/matching";
 import { asPlainText, tailorResumeForJob } from "@/lib/openai";
 import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Job, JobMatch, Resume } from "@/lib/types";
-import { canAutoApplyJob, tryAutoWebApply } from "@/lib/web-apply";
+import {
+  canAutoApplyJob,
+  canAutoSendJob,
+  tryAutoWebApply,
+} from "@/lib/web-apply";
+
+export type ProcessApplicationsOptions = {
+  /** Stop after this many successful sends (default: daily remaining). */
+  targetSent?: number;
+  /** Prefer / only attempt auto-sendable jobs (email or known ATS). */
+  autoSendableOnly?: boolean;
+  /** When false, allow a full targetSent batch even if daily quota is low. */
+  respectDailyQuota?: boolean;
+};
+
 
 export { wasSentToEmployer, isClearedFromPool };
 
@@ -196,7 +214,7 @@ async function repairBrokenLinkedInUrls(supabase: DbClient) {
 }
 
 const REMOTE_ROLE =
-  /developer|engineer|react|python|full.?stack|devops|data|product|ai|llm|finance|analyst|manager|design|marketing|sales|מוצר|פיננס|ניהול|מפתח/i;
+  /product|ai|llm|machine learning|data scientist|data analyst|finance|fp&a|analyst|marketing|sales|customer success|מוצר|פיננס|בינה|שיווק|מכירות/i;
 
 /** Pull live remote boards — Israel / IL-eligible only. */
 export async function syncLiveSocialJobs(supabase: DbClient) {
@@ -252,8 +270,8 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
 
   const remotiveQueries = [
     "https://remotive.com/api/remote-jobs?search=Israel&limit=100",
-    "https://remotive.com/api/remote-jobs?category=software-dev&limit=50",
-    "https://remotive.com/api/remote-jobs?category=product&limit=40",
+    // Skip software-dev — pool excludes developer roles
+    "https://remotive.com/api/remote-jobs?category=product&limit=50",
     "https://remotive.com/api/remote-jobs?category=data&limit=40",
     "https://remotive.com/api/remote-jobs?category=finance-legal&limit=30",
     "https://remotive.com/api/remote-jobs?category=marketing&limit=30",
@@ -374,8 +392,10 @@ export async function matchResumeToJobs(
 
   const matchRows = [];
   for (const job of israelJobs) {
-    // No generic Product Manager — only AI/ML product roles
+    // No developers / project managers / generic Product Manager
     if (shouldExcludeJob(job)) continue;
+    // Keep pool aligned with CV role families
+    if (isFamilyMismatchForResume(job, signals)) continue;
 
     const base = scoreMatch(
       resumeText,
@@ -383,6 +403,7 @@ export async function matchResumeToJobs(
       job,
       signals,
     );
+    if (base.reject) continue;
     const { score, reasons, reject } = applyRejectionPreference(
       base.score,
       base.reasons,
@@ -408,6 +429,83 @@ export async function matchResumeToJobs(
 
   if (upsertError) throw new Error(upsertError.message);
   return (data || []) as JobMatch[];
+}
+
+/**
+ * Match jobs that the cron / home button can actually auto-send
+ * (employer email or known ATS). Lower score floor so we don't stall at 0–2
+ * pool-style matches that are LinkedIn-only / manual.
+ */
+export async function matchResumeForAutoApply(
+  supabase: DbClient,
+  resume: Resume,
+  userId?: string,
+  limit = 80,
+): Promise<JobMatch[]> {
+  const resumeText =
+    resume.extracted_text || (resume.skills || []).join(" ") || resume.filename;
+  const signals = extractResumeSignals(resumeText, resume.skills || []);
+  const ownerId = userId || resume.user_id;
+  const rejections = await loadRejectionProfile(supabase, ownerId);
+  const minScore = Number(process.env.AUTO_APPLY_MIN_MATCH_SCORE || "0.18");
+
+  const { data: jobs, error } = await supabase.from("jobs").select("*");
+  if (error) throw new Error(error.message);
+
+  const scored: Array<{
+    resume_id: string;
+    job_id: string;
+    score: number;
+    reasons: string[];
+    user_id?: string;
+  }> = [];
+
+  for (const job of (jobs || []) as Job[]) {
+    if (!isIsraelLocation(job.location, job.description, job.company)) continue;
+    if (!hasActiveJobLink(job)) continue;
+    if (shouldExcludeJob(job)) continue;
+    // Must be auto-sendable now, or look fetchable (non-social career page)
+    const autoNow = canAutoSendJob(job);
+    const maybeFetchEmail =
+      !autoNow &&
+      Boolean(job.url) &&
+      !/linkedin\.com|facebook\.com|t\.me\//i.test(job.url || "");
+    if (!autoNow && !maybeFetchEmail) continue;
+
+    const base = scoreMatch(resumeText, resume.skills || [], job, signals);
+    if (base.reject) continue;
+    const { score, reasons, reject } = applyRejectionPreference(
+      base.score,
+      base.reasons,
+      job,
+      rejections,
+    );
+    if (reject || score < minScore) continue;
+
+    // Prefer true auto-sendable slightly in ranking
+    const rank = score + (autoNow ? 0.05 : 0);
+    scored.push({
+      resume_id: resume.id,
+      job_id: job.id,
+      score: rank,
+      reasons,
+      ...(ownerId ? { user_id: ownerId } : {}),
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, limit);
+  if (!top.length) return [];
+
+  const { data, error: upsertError } = await supabase
+    .from("job_matches")
+    .upsert(top, { onConflict: "resume_id,job_id" })
+    .select("*, jobs(*)");
+
+  if (upsertError) throw new Error(upsertError.message);
+  return ((data || []) as JobMatch[]).sort(
+    (a, b) => Number(b.score) - Number(a.score),
+  );
 }
 
 async function sendApplicationEmail(input: {
@@ -480,6 +578,7 @@ export async function processApplicationsForResume(
   matches: JobMatch[],
   userId?: string,
   candidateEmail?: string | null,
+  options: ProcessApplicationsOptions = {},
 ) {
   const resumeText =
     resume.extracted_text || (resume.skills || []).join(" ") || "";
@@ -493,22 +592,37 @@ export async function processApplicationsForResume(
     normalizeApplyEmail(process.env.CANDIDATE_EMAIL) ||
     normalizeApplyEmail(process.env.APPLICATION_CANDIDATE_EMAIL) ||
     null;
+  const respectDailyQuota = options.respectDailyQuota !== false;
   const daily = ownerId
     ? await getDailyAutoApplyUsage(supabase, ownerId)
     : { used: 0, quota: 20, remaining: 20, dayKey: "" };
-  if (daily.remaining <= 0) {
+  const targetSent = Math.max(
+    1,
+    Math.min(
+      options.targetSent ??
+        Number(process.env.AUTO_APPLY_PER_RUN || "20"),
+      40,
+    ),
+  );
+  const sendBudget = respectDailyQuota
+    ? Math.min(targetSent, daily.remaining)
+    : targetSent;
+  if (sendBudget <= 0) {
     return [];
   }
 
-  // Cap attempts; stop early once today's successful auto-sends hit the quota.
+  // Cap attempts; stop early once successful auto-sends hit the run budget.
   const maxApps = Math.min(
-    Number(process.env.MAX_APPLICATIONS_PER_RUN || "40"),
-    60,
-    Math.max(daily.remaining * 3, daily.remaining),
+    Number(process.env.MAX_APPLICATIONS_PER_RUN || "60"),
+    80,
+    Math.max(sendBudget * 4, sendBudget),
   );
   // Prefer jobs we can actually auto-send (email or apply page)
   const sorted = [...matches]
     .filter((m) => m.jobs && hasActiveJobLink(m.jobs))
+    .filter((m) =>
+      options.autoSendableOnly ? canAutoSendJob(m.jobs) || Boolean(m.jobs?.url) : true,
+    )
     .sort((a, b) => {
       const autoA =
         (a.jobs && resolveEmployerEmail(a.jobs) ? 2 : 0) +
@@ -521,18 +635,18 @@ export async function processApplicationsForResume(
     });
   const results = [];
   let urlFetchBudget = Math.min(
-    Number(process.env.MAX_EMAIL_FETCH_PER_RUN || "15"),
-    20,
+    Number(process.env.MAX_EMAIL_FETCH_PER_RUN || "20"),
+    25,
   );
   let webApplyBudget = Math.min(
     Number(process.env.MAX_WEB_APPLY_PER_RUN || "20"),
     25,
-    daily.remaining,
+    sendBudget,
   );
   let sentThisRun = 0;
 
   for (const match of sorted.slice(0, maxApps)) {
-    if (sentThisRun >= daily.remaining) break;
+    if (sentThisRun >= sendBudget) break;
     const job = match.jobs;
     if (!job) continue;
 
@@ -641,74 +755,86 @@ export async function processApplicationsForResume(
       status = "skipped";
       method = "disabled";
       skipReason = "שליחה אוטומטית כבויה (ENABLE_EMPLOYER_EMAIL=false)";
-    } else if (applyEmail) {
-      const emailBody = [
-        `שלום,`,
-        ``,
-        `מצורפת מועמדות למשרה: ${job.title}`,
-        `חברה: ${job.company || "—"}`,
-        `קישור למשרה: ${job.url || "—"}`,
-        ``,
-        `סיכום התאמה קצר:`,
-        insights,
-        ``,
-        `קו״ח מותאם:`,
-        tailoredCv,
-        ``,
-        replyTo ? `ליצירת קשר עם המועמד/ת: ${replyTo}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const sent = await sendApplicationEmail({
-        to: applyEmail,
-        replyTo,
-        subject: `מועמדות: ${job.title}${job.company ? ` — ${job.company}` : ""}`,
-        body: emailBody,
-      });
-
-      if (sent.ok) {
-        status = "sent";
-        method = "job-email";
-        skipReason = null;
-      } else if (sent.error?.includes("RESEND_API_KEY")) {
-        status = "skipped";
-        method = "no-resend";
-        skipReason = explainResendFailure(sent.error);
-      } else {
-        status = "failed";
-        method = "job-email";
-        error = sent.error || "שליחה למעסיק נכשלה";
-        skipReason = explainResendFailure(sent.error);
-      }
-    } else if (webApplyBudget > 0) {
-      webApplyBudget -= 1;
-      const web = await tryAutoWebApply({
-        job,
-        resumeText,
-        skills: resume.skills || [],
-        tailoredCv,
-        insights,
-      });
-      if (web?.ok) {
-        status = "sent";
-        method = "web-form";
-        skipReason = web.detail || "הוגש אוטומטית בטופס האתר";
-      } else {
-        status = "skipped";
-        method = isSocial ? "link-only" : "no-web-form";
-        skipReason =
-          web?.detail ||
-          (isSocial
-            ? "לא הוגש — פוסט ברשת בלי טופס/מייל. פתח קישור והגש עם מילוי מהקו״ח"
-            : "לא הוגש אוטומטית — אין מייל/טופס נגיש. השתמש ב״הגש אוטומטית״ או מילוי ידני");
-      }
     } else {
-      status = "skipped";
-      method = isSocial ? "link-only" : "no-email";
-      skipReason = isSocial
-        ? "לא נשלח — פוסט ברשת בלי מייל/טופס הגשה"
-        : "לא נשלח — אין מייל מעסיק; מכסת הגשות אתר לסריקה זו מלאה";
+      let emailFailedReason: string | null = null;
+
+      if (applyEmail) {
+        const emailBody = [
+          `שלום,`,
+          ``,
+          `מצורפת מועמדות למשרה: ${job.title}`,
+          `חברה: ${job.company || "—"}`,
+          `קישור למשרה: ${job.url || "—"}`,
+          ``,
+          `סיכום התאמה קצר:`,
+          insights,
+          ``,
+          `קו״ח מותאם:`,
+          tailoredCv,
+          ``,
+          replyTo ? `ליצירת קשר עם המועמד/ת: ${replyTo}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const sent = await sendApplicationEmail({
+          to: applyEmail,
+          replyTo,
+          subject: `מועמדות: ${job.title}${job.company ? ` — ${job.company}` : ""}`,
+          body: emailBody,
+        });
+
+        if (sent.ok) {
+          status = "sent";
+          method = "job-email";
+          skipReason = null;
+        } else {
+          emailFailedReason = explainResendFailure(sent.error);
+          // Fall through to ATS web-form when Resend missing/fails
+        }
+      }
+
+      if (status !== "sent" && canWeb && webApplyBudget > 0) {
+        webApplyBudget -= 1;
+        const web = await tryAutoWebApply({
+          job,
+          resumeText,
+          skills: resume.skills || [],
+          tailoredCv,
+          insights,
+        });
+        if (web?.ok) {
+          status = "sent";
+          method = "web-form";
+          skipReason = web.detail || "הוגש אוטומטית בטופס האתר";
+          error = null;
+        } else {
+          status = "skipped";
+          method = applyEmail && emailFailedReason?.includes("RESEND")
+            ? "no-resend"
+            : isSocial
+              ? "link-only"
+              : "no-web-form";
+          skipReason =
+            web?.detail ||
+            emailFailedReason ||
+            (isSocial
+              ? "לא הוגש — פוסט ברשת בלי טופס/מייל"
+              : "לא הוגש אוטומטית — אין מייל/טופס נגיש");
+        }
+      } else if (status !== "sent") {
+        status = "skipped";
+        if (emailFailedReason) {
+          method = emailFailedReason.includes("RESEND") ? "no-resend" : "job-email";
+          skipReason = emailFailedReason;
+          error = emailFailedReason;
+        } else {
+          method = isSocial ? "link-only" : "no-email";
+          skipReason = isSocial
+            ? "לא נשלח — פוסט ברשת בלי מייל/טופס הגשה"
+            : "לא נשלח — אין מייל מעסיק ואין טופס ATS נגיש";
+        }
+      }
     }
 
     // Persist only real employer sends. Failures / skips stay out of history DB.
