@@ -212,15 +212,14 @@ def fetch_drushim(limit: int = 60) -> list[ScrapedJob]:
         "בינה מלאכותית",
         "machine learning",
         "מנהל מוצר AI",
-        "python",
-        "מפתח תוכנה",
-        "full stack",
-        "devops",
+        "מנהל מוצר",
         "data scientist",
         "אנליסט",
         "פיננסים",
-        "מנהל פרויקטים",
         "הצלחת לקוחות",
+        "שיווק דיגיטלי",
+        "product owner",
+        "product analyst",
     ]
     seen: set[str] = set()
     try:

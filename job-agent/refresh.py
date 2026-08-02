@@ -89,12 +89,27 @@ DOMAIN_TERMS = [
 DOMAIN_TAGS = {"ai", "product", "finance", "management", "marketing", "sales", "tech"}
 
 
-_PM_TITLE_RE = re.compile(
+_PRODUCT_MANAGER_TITLE_RE = re.compile(
     r"(?:ai\s+)?product\s*managers?|(?:ai\s+)?product\s*owners?|"
     r"associate\s*product\s*manager|technical\s*product\s*manager|"
     r"group\s*product\s*manager|growth\s*product\s*manager|"
     r"platform\s*product\s*manager|head of product|vp\s*product|"
     r"מנהל(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b",
+    re.I,
+)
+_DEVELOPER_TITLE_RE = re.compile(
+    r"(?:software|frontend|front.?end|backend|back.?end|full.?stack|fullstack|"
+    r"mobile|android|ios|devops|sre|platform|cloud|qa|automation|integration)\s*"
+    r"(?:engineer|developer|programmer)s?|"
+    r"(?:react|angular|vue|node\.?js|java|golang|\.net|php|ruby|salesforce)\s*"
+    r"(?:developer|engineer)s?|"
+    r"מפתח(?:ת)?(?:\s|$)|מפתח(?:ת)?\s+(?:תוכנה|full.?stack|frontend|backend|"
+    r"fullstack|mobile|אינטגרציה|אוטומציה)|מהנדס(?:ת)?\s*תוכנה|programmer",
+    re.I,
+)
+_PROJECT_MANAGER_TITLE_RE = re.compile(
+    r"(?:ai\s+)?project\s*managers?|program\s*managers?|delivery\s*managers?|"
+    r"implementation\s*managers?|מנהל(?:ת)?\s*פרויקט(?:ים)?|מנהל(?:ת)?\s*תכניות",
     re.I,
 )
 _AI_DOMAIN_RE = re.compile(
@@ -107,12 +122,16 @@ _LETTER_RE = re.compile(r"[A-Za-z\u0590-\u05FF]")
 
 
 def _should_exclude_job(job: dict[str, Any]) -> bool:
-    """Skip generic Product Manager roles; keep AI/ML product roles."""
+    """Skip developers, project managers, and generic Product Manager roles."""
     title = job.get("title") or ""
-    if not _PM_TITLE_RE.search(title):
-        return False
-    blob = f"{title} {job.get('description') or ''}"
-    return _AI_DOMAIN_RE.search(blob) is None
+    if _DEVELOPER_TITLE_RE.search(title):
+        return True
+    if _PROJECT_MANAGER_TITLE_RE.search(title):
+        return True
+    if _PRODUCT_MANAGER_TITLE_RE.search(title):
+        blob = f"{title} {job.get('description') or ''}"
+        return _AI_DOMAIN_RE.search(blob) is None
+    return False
 
 
 def _hebrew_ratio(text: str) -> float:

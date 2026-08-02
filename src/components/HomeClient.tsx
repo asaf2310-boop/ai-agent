@@ -484,19 +484,23 @@ export function HomeClient({ email }: { email?: string | null }) {
       if (json.dailyQuota) {
         setDailyQuota(json.dailyQuota as DailyQuota);
       }
-      const q = json.dailyQuota as DailyQuota | undefined;
-      const quotaHint = q
-        ? ` · היום ${q.used}/${q.quota} אוטומטיות`
-        : "";
+      const sent = json.sentCount ?? 0;
+      const candidates = json.autoCandidates ?? 0;
       setMessage(
-        `סריקה הושלמה: פול ${Math.min(json.matchesCount ?? 0, 50)} · הוגש אוטומטית: ${json.sentCount ?? 0}${quotaHint} · נפתח: ${json.openedCount ?? 0}` +
-          (q && q.remaining <= 0
-            ? ` — מכסת היום מלאה (${q.quota}). סריקה אוטומטית תמשיך מחר.`
-            : (json.sentCount ?? 0) === 0
-              ? " — אין מייל/טופס ATS במשרות הנוכחיות; בפול רק משרות עם קישור פעיל להגשה ידנית"
-              : ""),
+        sent > 0
+          ? `סריקה הושלמה: נשלחו ${sent} משרות אוטומטית להיסטוריה` +
+              (candidates ? ` (מתוך ${candidates} מועמדות)` : "") +
+              ` · בפול ${Math.min(json.matchesCount ?? 0, 50)} להגשה ידנית`
+          : `סריקה הושלמה: לא נשלח אוטומטית` +
+              (candidates
+                ? ` — נמצאו ${candidates} מועמדות אבל מייל/טופס ATS לא הצליח`
+                : " — לא נמצאו משרות עם מייל מעסיק או טופס ATS") +
+              (!json.resendConfigured
+                ? " · חסר RESEND_API_KEY ב-Vercel לשליחת מייל"
+                : "") +
+              ` · בפול ${Math.min(json.matchesCount ?? 0, 50)} ידניות`,
       );
-      setTab("pool");
+      setTab(sent > 0 ? "history" : "pool");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "שגיאה בהרצת הסריקה");
     } finally {

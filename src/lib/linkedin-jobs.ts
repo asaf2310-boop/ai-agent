@@ -38,15 +38,14 @@ const ISRAEL_GEO = "101620260";
 
 const SEARCHES = [
   "AI OR LLM OR \"machine learning\" OR \"data scientist\" OR \"בינה מלאכותית\"",
-  "\"AI product manager\" OR \"AI product owner\" OR \"product manager AI\" OR \"LLM product\"",
-  "מפתח OR \"מנהל פרויקטים\" OR אנליסט OR חשב OR \"הצלחת לקוחות\"",
+  "\"AI product manager\" OR \"AI product owner\" OR \"product manager AI\" OR \"LLM product\" OR \"מנהל מוצר AI\"",
+  "אנליסט OR חשב OR \"הצלחת לקוחות\" OR שיווק OR \"product analyst\"",
   "finance OR fintech OR FP&A OR controller OR \"financial analyst\" OR פיננסים",
-  "\"project manager\" OR \"operations manager\" OR \"team lead\" OR management",
-  "\"full stack\" OR \"software engineer\" OR devops OR \"backend\" OR react OR \"מפתח תוכנה\"",
+  "\"product owner\" OR \"product marketing\" OR \"customer success\" OR operations",
 ];
 
 const RELEVANT =
-  /ai|llm|machine learning|data|product|finance|fintech|fp&a|controller|management|manager|operations|engineer|developer|devops|analyst|marketing|sales|customer success|מוצר|פיננס|ניהול|מנהל|בינה/i;
+  /ai|llm|machine learning|data scientist|data analyst|product|finance|fintech|fp&a|controller|analyst|marketing|sales|customer success|מוצר|פיננס|בינה|שיווק|מכירות|אנליסט/i;
 
 function decodeHtml(s: string): string {
   return s
