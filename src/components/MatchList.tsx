@@ -37,6 +37,9 @@ function kindLabel(job: JobMatch["jobs"]) {
   const source = (job.source || "").toLowerCase();
   if (source === "linkedin") return "LinkedIn";
   if (source === "drushim") return "דרושים";
+  if (source === "alljobs") return "AllJobs";
+  if (source === "jobmaster") return "JobMaster";
+  if (source === "jobify") return "Jobify";
   if (source === "remoteok") return "RemoteOK";
   if (source === "remotive") return "Remotive";
   if (source === "arbeitnow") return "Arbeitnow";
@@ -46,13 +49,19 @@ function kindLabel(job: JobMatch["jobs"]) {
     job.post_kind === "social" ||
     source.startsWith("social-") ||
     (job.is_social &&
-      !["remoteok", "remotive", "drushim", "arbeitnow"].includes(source))
+      ![
+        "remoteok",
+        "remotive",
+        "drushim",
+        "alljobs",
+        "jobmaster",
+        "jobify",
+        "arbeitnow",
+      ].includes(source))
   ) {
     return "סושיאל";
   }
-  if (
-    ["alljobs", "jobmaster", "jobnet", "gotfriends"].includes(source)
-  ) {
+  if (["jobnet", "gotfriends"].includes(source)) {
     return "לוח משרות";
   }
   return null;

@@ -204,23 +204,28 @@ def fetch_remotive(limit: int = 25) -> list[ScrapedJob]:
     return jobs[:limit]
 
 
+DEFAULT_IL_SEARCHES = [
+    "מנהל מוצר AI",
+    "מנהל מוצר",
+    "בינה מלאכותית",
+    "product manager",
+    "data analyst",
+    "אנליסט",
+    "פיננסים",
+    "הצלחת לקוחות",
+    "שיווק דיגיטלי",
+    "product owner",
+]
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value or "")).strip()
+
+
 def fetch_drushim(limit: int = 60) -> list[ScrapedJob]:
     """Live Drushim search API — real /job/{code}/{hash}/ deep-links."""
     jobs: list[ScrapedJob] = []
-    searches = [
-        "AI",
-        "בינה מלאכותית",
-        "machine learning",
-        "מנהל מוצר AI",
-        "מנהל מוצר",
-        "data scientist",
-        "אנליסט",
-        "פיננסים",
-        "הצלחת לקוחות",
-        "שיווק דיגיטלי",
-        "product owner",
-        "product analyst",
-    ]
+    searches = DEFAULT_IL_SEARCHES
     seen: set[str] = set()
     try:
         with httpx.Client(timeout=25.0, headers={"User-Agent": USER_AGENT}) as client:
@@ -299,6 +304,246 @@ def fetch_drushim(limit: int = 60) -> list[ScrapedJob]:
     return jobs
 
 
+def fetch_alljobs(limit: int = 60) -> list[ScrapedJob]:
+    """Live AllJobs guest search — UploadSingle.aspx?JobID= deep-links."""
+    jobs: list[ScrapedJob] = []
+    seen: set[str] = set()
+    link_re = re.compile(
+        r'href="/Search/UploadSingle\.aspx\?JobID=(\d+)"[\s\S]{0,120}?<h2[^>]*>([\s\S]*?)</h2>',
+        re.I,
+    )
+    try:
+        with httpx.Client(timeout=30.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+            for term in DEFAULT_IL_SEARCHES:
+                if len(jobs) >= limit:
+                    break
+                try:
+                    resp = client.get(
+                        "https://www.alljobs.co.il/SearchResultsGuest.aspx",
+                        params={
+                            "page": 1,
+                            "position": "",
+                            "type": "",
+                            "city": "",
+                            "region": "",
+                            "freetxt": term,
+                        },
+                    )
+                    if resp.status_code >= 400:
+                        continue
+                    html = resp.text
+                except Exception:  # noqa: BLE001
+                    continue
+                for match in link_re.finditer(html):
+                    job_id = match.group(1)
+                    if job_id in seen:
+                        continue
+                    seen.add(job_id)
+                    title = _strip_html(match.group(2))
+                    if not title:
+                        continue
+                    chunk = html[match.start() : match.start() + 4500]
+                    company_m = re.search(
+                        r"Employer/HP/Default\.aspx\?cid=\d+[^>]*>\s*([^<]+)",
+                        chunk,
+                        re.I,
+                    )
+                    company = (company_m.group(1).strip() if company_m else None) or None
+                    desc = _strip_html(
+                        re.sub(r"<script[\s\S]*?</script>", " ", chunk, flags=re.I)
+                    )[:4000]
+                    url = f"https://www.alljobs.co.il/Search/UploadSingle.aspx?JobID={job_id}"
+                    kind = "freelance" if FREELANCE_HINTS.search(f"{title} {desc}") else "job"
+                    jobs.append(
+                        ScrapedJob(
+                            source="alljobs",
+                            external_id=job_id,
+                            title=title,
+                            company=company,
+                            location="ישראל",
+                            url=url,
+                            description=desc or title,
+                            posted_at=None,
+                            apply_email=None,
+                            post_kind=kind,
+                            channel="alljobs",
+                            is_social=False,
+                        )
+                    )
+                    if len(jobs) >= limit:
+                        break
+    except Exception:  # noqa: BLE001
+        return jobs
+    return jobs[:limit]
+
+
+def fetch_jobify(limit: int = 40) -> list[ScrapedJob]:
+    """Live Jobify360 jobs via sitemap + JobPosting JSON-LD."""
+    import json
+
+    jobs: list[ScrapedJob] = []
+    try:
+        with httpx.Client(timeout=25.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+            index = client.get("https://jobify360.co.il/sitemap.xml")
+            index.raise_for_status()
+            sm_urls = re.findall(
+                r"<loc>\s*([^<]*sitemap-jobs[^<]*)\s*</loc>",
+                index.text,
+                flags=re.I,
+            )
+            sm_urls = sorted(
+                {
+                    u.strip()
+                    for u in sm_urls
+                    if re.search(r"sitemap-jobs-\d+\.xml", u, re.I)
+                },
+                key=lambda u: int(re.search(r"sitemap-jobs-(\d+)", u).group(1))
+                if re.search(r"sitemap-jobs-(\d+)", u)
+                else 0,
+                reverse=True,
+            )
+            pick = sm_urls[:4] + [u for u in sm_urls if re.search(r"sitemap-jobs-2\d\.xml", u)][:2]
+            entries: list[tuple[str, float]] = []
+            for sm in list(dict.fromkeys(pick)):
+                try:
+                    xml = client.get(sm).text
+                except Exception:  # noqa: BLE001
+                    continue
+                for block in re.findall(r"<url>[\s\S]*?</url>", xml, flags=re.I):
+                    loc_m = re.search(r"<loc>\s*([^<]+)\s*</loc>", block, re.I)
+                    if not loc_m:
+                        continue
+                    loc = loc_m.group(1).strip()
+                    if not re.search(r"/jobs/\d+-[a-z]{2,6}/?$", loc, re.I):
+                        continue
+                    lm_m = re.search(r"<lastmod>\s*([^<]+)\s*</lastmod>", block, re.I)
+                    ts = 0.0
+                    if lm_m:
+                        try:
+                            ts = datetime.fromisoformat(
+                                lm_m.group(1).replace("Z", "+00:00")
+                            ).timestamp()
+                        except ValueError:
+                            ts = 0.0
+                    entries.append((loc, ts))
+            entries.sort(key=lambda x: x[1], reverse=True)
+            keywords = re.compile(
+                r"product|manager|מוצר|AI|LLM|analyst|אנליסט|finance|פיננס|marketing|שיווק|success",
+                re.I,
+            )
+            for loc, ts in entries[:120]:
+                if len(jobs) >= limit:
+                    break
+                try:
+                    html = client.get(loc).text
+                except Exception:  # noqa: BLE001
+                    continue
+                posting = None
+                for block in re.findall(
+                    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+                    html,
+                    flags=re.I,
+                ):
+                    try:
+                        data = json.loads(block)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    nodes = data if isinstance(data, list) else [data]
+                    for node in nodes:
+                        if isinstance(node, dict) and node.get("@type") == "JobPosting":
+                            posting = node
+                            break
+                    if posting:
+                        break
+                if not posting:
+                    continue
+                title = _strip_html(str(posting.get("title") or ""))
+                desc = _strip_html(str(posting.get("description") or ""))[:4000]
+                if not title or not keywords.search(f"{title} {desc}"):
+                    continue
+                org = posting.get("hiringOrganization") or {}
+                company = None
+                if isinstance(org, dict):
+                    company = str(org.get("name") or "") or None
+                job_id_m = re.search(r"/jobs/(\d+)-([a-z]{2,6})", loc, re.I)
+                if not job_id_m:
+                    continue
+                posted = None
+                if ts:
+                    posted = datetime.fromtimestamp(ts, tz=timezone.utc)
+                jobs.append(
+                    ScrapedJob(
+                        source="jobify",
+                        external_id=f"{job_id_m.group(1)}-{job_id_m.group(2).lower()}",
+                        title=title,
+                        company=company,
+                        location="ישראל",
+                        url=loc.rstrip("/"),
+                        description=desc or title,
+                        posted_at=posted,
+                        apply_email=None,
+                        post_kind="job",
+                        channel="jobify",
+                        is_social=False,
+                    )
+                )
+    except Exception:  # noqa: BLE001
+        return jobs
+    return jobs[:limit]
+
+
+def fetch_jobmaster(limit: int = 30) -> list[ScrapedJob]:
+    """Best-effort JobMaster scrape — board is often unreachable from cloud hosts."""
+    jobs: list[ScrapedJob] = []
+    seen: set[str] = set()
+    try:
+        with httpx.Client(timeout=12.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+            for term in DEFAULT_IL_SEARCHES[:5]:
+                if len(jobs) >= limit:
+                    break
+                for url in (
+                    f"https://www.jobmaster.co.il/jobs/?q={term}",
+                    f"https://www.jobmaster.co.il/jobs/checknew.asp?q={term}",
+                ):
+                    try:
+                        resp = client.get(url)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if resp.status_code >= 400 or len(resp.text) < 500:
+                        continue
+                    for key in re.findall(r"checknum\.asp\?key=(\d+)", resp.text, flags=re.I):
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        title_m = re.search(
+                            rf"checknum\.asp\?key={key}[^>]*>\s*([^<]{{3,120}})",
+                            resp.text,
+                            flags=re.I,
+                        )
+                        title = _strip_html(title_m.group(1) if title_m else f"משרה {key}")
+                        jobs.append(
+                            ScrapedJob(
+                                source="jobmaster",
+                                external_id=key,
+                                title=title,
+                                company=None,
+                                location="ישראל",
+                                url=f"https://www.jobmaster.co.il/jobs/checknum.asp?key={key}",
+                                description=title,
+                                posted_at=None,
+                                apply_email=None,
+                                post_kind="job",
+                                channel="jobmaster",
+                                is_social=False,
+                            )
+                        )
+                        if len(jobs) >= limit:
+                            break
+    except Exception:  # noqa: BLE001
+        return jobs
+    return jobs[:limit]
+
+
 def fetch_rss_feed(feed_url: str, limit: int = 20) -> list[ScrapedJob]:
     jobs: list[ScrapedJob] = []
     try:
@@ -357,6 +602,9 @@ def discover_social_jobs() -> list[ScrapedJob]:
     discovered.extend(fetch_remoteok(limit=40))
     discovered.extend(fetch_remotive(limit=60))
     discovered.extend(fetch_drushim(limit=70))
+    discovered.extend(fetch_alljobs(limit=60))
+    discovered.extend(fetch_jobify(limit=40))
+    discovered.extend(fetch_jobmaster(limit=30))
 
     try:
         from linkedin_jobs import fetch_linkedin_israel_jobs
@@ -376,8 +624,9 @@ def discover_social_jobs() -> list[ScrapedJob]:
     # Skip null-URL catalog social demos — they cannot open in the pool.
 
     uniq: dict[tuple[str, str], ScrapedJob] = {}
+    live_il = {"linkedin", "drushim", "alljobs", "jobmaster", "jobify"}
     for job in discovered:
-        if job.source in ("linkedin", "drushim"):
+        if job.source in live_il:
             uniq[(job.source, job.external_id)] = job
             continue
         if not is_israel_job(job.location, job.description, job.company):

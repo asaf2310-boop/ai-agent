@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildIlBoardSearchQueries } from "@/lib/cv-search-queries";
 import {
   ensureSampleJobs,
   matchResumeToJobs,
   processApplicationsForResume,
   syncCompanyCareerJobs,
-  syncDrushimJobs,
+  syncIsraeliBoards,
   syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
@@ -159,8 +160,11 @@ export async function POST(request: Request) {
     const resume = data as Resume;
 
     await ensureSampleJobs(supabase);
+    const boardQueries = buildIlBoardSearchQueries(
+      extractedText ? extractResumeSignals(extractedText) : null,
+    );
     await syncLiveSocialJobs(supabase);
-    await syncDrushimJobs(supabase);
+    await syncIsraeliBoards(supabase, { queries: boardQueries });
     await syncCompanyCareerJobs(supabase);
     await syncLinkedInJobs(supabase);
     const matches = await matchResumeToJobs(supabase, resume, undefined, user.id);

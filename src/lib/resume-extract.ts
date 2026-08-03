@@ -273,24 +273,41 @@ export function extractResumeSignals(
     }
   }
 
-  // Domain tags → families
+  // Domain tags → families (avoid loose tags flooding the wrong role family)
   if (skills.includes("product") || skills.includes("product management")) {
     families.add("product");
   }
-  if (skills.includes("ai") || skills.includes("llm") || skills.includes("machine learning")) {
+  // Bare "ai" on a Product/Finance CV must not pull pure AI Engineer roles
+  if (
+    skills.includes("llm") ||
+    skills.includes("machine learning") ||
+    skills.includes("deep learning") ||
+    skills.includes("pytorch") ||
+    skills.includes("tensorflow") ||
+    skills.includes("data science") ||
+    (/בינה מלאכותית|data scientist|ml engineer|prompt engineer/i.test(raw) &&
+      !families.has("product"))
+  ) {
+    families.add("data_ai");
+  } else if (
+    skills.includes("ai") &&
+    !families.has("product") &&
+    !families.has("finance") &&
+    !families.has("marketing") &&
+    !families.has("sales")
+  ) {
     families.add("data_ai");
   }
   if (skills.includes("finance") || skills.includes("fp&a")) {
     families.add("finance");
   }
-  if (skills.includes("tech") || skills.includes("python") || skills.includes("react")) {
-    // Only add engineering if there are strong eng signals — avoid tagging every Python mention
-    if (
-      /software|developer|engineer|מפתח|fullstack|backend|frontend|devops/i.test(raw) ||
-      skills.includes("tech")
-    ) {
-      families.add("engineering");
-    }
+  // Languages alone (python/react) do not make an engineering CV
+  if (
+    /software\s*engineer|full\s*stack|fullstack|backend engineer|frontend engineer|devops|מפתח(?:ת)?\s*תוכנה|מהנדס(?:ת)?\s*תוכנה/i.test(
+      raw,
+    )
+  ) {
+    families.add("engineering");
   }
 
   const domains = skills.filter((s) =>

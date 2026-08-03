@@ -12,16 +12,18 @@ import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { POOL_LIMIT, sortMatchesByBestFit } from "@/lib/match-pool";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildIlBoardSearchQueries } from "@/lib/cv-search-queries";
 import {
   ensureSampleJobs,
   matchResumeForAutoApply,
   matchResumeToJobs,
   processApplicationsForResume,
   syncCompanyCareerJobs,
-  syncDrushimJobs,
+  syncIsraeliBoards,
   syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
+import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Application, Resume } from "@/lib/types";
 import { shouldExcludeJob } from "@/lib/matching";
 import { canAutoSendJob } from "@/lib/web-apply";
@@ -37,11 +39,6 @@ export async function POST(request: Request) {
 
     const supabase = createAdminClient();
     await ensureSampleJobs(supabase);
-    // ATS company boards first — needed for real auto-send
-    await syncCompanyCareerJobs(supabase);
-    await syncLiveSocialJobs(supabase);
-    await syncDrushimJobs(supabase);
-    await syncLinkedInJobs(supabase);
 
     let resumeQuery = supabase
       .from("resumes")
@@ -79,6 +76,19 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    const resumeText =
+      resume.extracted_text ||
+      (resume.skills || []).join(" ") ||
+      resume.filename;
+    const signals = extractResumeSignals(resumeText, resume.skills || []);
+    const boardQueries = buildIlBoardSearchQueries(signals);
+
+    // ATS company boards first — needed for real auto-send
+    await syncCompanyCareerJobs(supabase);
+    await syncLiveSocialJobs(supabase);
+    await syncIsraeliBoards(supabase, { queries: boardQueries, signals });
+    await syncLinkedInJobs(supabase);
 
     // Ownership check
     if (resume.user_id && resume.user_id !== user.id) {

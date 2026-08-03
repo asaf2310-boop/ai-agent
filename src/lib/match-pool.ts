@@ -64,7 +64,11 @@ function matchesKind(job: Job | undefined, kind: MatchPoolFilters["kind"]): bool
   }
   if (kind === "social") {
     // True social posts only — not Remotive/RemoteOK board feeds
-    if (isLiveBoardSource(source) && source !== "drushim" && !source.startsWith("rss-")) {
+    if (
+      isLiveBoardSource(source) &&
+      source !== "drushim" &&
+      !source.startsWith("rss-")
+    ) {
       return false;
     }
     return (
@@ -80,6 +84,9 @@ function matchesKind(job: Job | undefined, kind: MatchPoolFilters["kind"]): bool
           "arbeitnow",
           "jobicy",
           "drushim",
+          "alljobs",
+          "jobmaster",
+          "jobify",
           "greenhouse",
           "lever",
           "ashby",

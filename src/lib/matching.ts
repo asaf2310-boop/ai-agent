@@ -1,4 +1,5 @@
 import type { Job } from "@/lib/types";
+import { strongResumeFamilies } from "@/lib/cv-search-queries";
 import {
   extractResumeSignals,
   type RoleFamily,
@@ -8,15 +9,15 @@ import {
 
 /** Classic Product Manager / Product Owner titles (not every "product" mention). */
 const PRODUCT_MANAGER_TITLE_RE =
-  /\b(?:ai\s+)?product\s*managers?\b|\b(?:ai\s+)?product\s*owners?\b|\bassociate\s*product\s*manager\b|\btechnical\s*product\s*manager\b|\bgroup\s*product\s*manager\b|\bgrowth\s*product\s*manager\b|\bplatform\s*product\s*manager\b|\bhead of product\b|\bvp\s*product\b|מנהל(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b/i;
+  /\b(?:ai\s+)?product\s*managers?\b|\b(?:ai\s+)?product\s*owners?\b|\bassociate\s*product\s*manager\b|\btechnical\s*product\s*manager\b|\bgroup\s*product\s*manager\b|\bgrowth\s*product\s*manager\b|\bplatform\s*product\s*manager\b|\bhead of product\b|\bvp\s*product\b|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b/i;
 
 /** Software developer / engineer / programmer titles — never enter the pool. */
 const DEVELOPER_TITLE_RE =
-  /\b(?:software|frontend|front.?end|backend|back.?end|full.?stack|fullstack|mobile|android|ios|devops|sre|platform|cloud|qa|automation|integration)\s*(?:engineer|developer|programmer)s?\b|\b(?:engineer|developer|programmer)s?\s*(?:software|frontend|backend|full.?stack|fullstack)\b|\b(?:react|angular|vue|node\.?js|java|golang|\.net|php|ruby)\s*(?:developer|engineer)s?\b|\bsalesforce\s*developer\b|\bמפתח(?:ת)?(?:\s|$)|מפתח(?:ת)?\s+(?:תוכנה|full.?stack|frontend|backend|fullstack|mobile|אינטגרציה|אוטומציה)|מהנדס(?:ת)?\s*תוכנה|\bprogrammer\b|\bsoftware\s*development\b/i;
+  /\b(?:software|frontend|front.?end|backend|back.?end|full.?stack|fullstack|mobile|android|ios|devops|sre|platform|cloud|qa|automation|integration|forward\s*deployed)\s*(?:engineer|developer|programmer)s?\b|\b(?:ai|ml|machine\s*learning|llm|data|research|computer\s*vision|cv|nlp|gen(?:erative)?\s*ai)\s*(?:engineer|developer)s?\b|\b(?:engineer|developer|programmer)s?\s*(?:software|frontend|backend|full.?stack|fullstack)\b|\b(?:react|angular|vue|node\.?js|java|golang|\.net|php|ruby)\s*(?:developer|engineer)s?\b|\bsalesforce\s*developer\b|מפתח(?:\s*\/\s*ת)?(?:ת)?(?:\s|$)|מפתח(?:\s*\/\s*ת)?(?:ת)?\s+(?:תוכנה|full.?stack|frontend|backend|fullstack|mobile|אינטגרציה|אוטומציה|AI)|מהנדס(?:\s*\/\s*ת)?(?:ת)?\s*(?:תוכנה|AI|נתונים)|דרוש\s*\/?ה\s*devops|\bprogrammer\b|\bsoftware\s*development\b|\bdevops\s*engineer\b/i;
 
 /** Project / program / delivery manager titles — never enter the pool. */
 const PROJECT_MANAGER_TITLE_RE =
-  /\b(?:ai\s+)?project\s*managers?\b|\bprogram\s*managers?\b|\bdelivery\s*managers?\b|\bimplementation\s*managers?\b|\bפרויקט(?:ים)?\b.*\bמנהל(?:ת)?\b|\bמנהל(?:ת)?\s*פרויקט(?:ים)?\b|\bמנהל(?:ת)?\s*תכניות\b/i;
+  /\b(?:ai\s+)?project\s*managers?\b|\bprogram\s*managers?\b|\bdelivery\s*managers?\b|\bimplementation\s*managers?\b|פרויקט(?:ים)?.*מנהל(?:\s*\/\s*ת)?(?:ת)?|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*פרויקט(?:ים)?|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*תכניות|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*עבודה/i;
 
 const AI_DOMAIN_RE =
   /\b(?:ai|a\.i\.|llm|llms|gen(?:erative)?\s*ai|machine\s*learning|\bml\b|nlp|deep\s*learning|בינה\s*מלאכותית|למידת\s*מכונה)\b/i;
@@ -97,7 +98,7 @@ const STOPWORDS = new Set([
 const FAMILY_PATTERNS: Array<{ family: RoleFamily; re: RegExp }> = [
   {
     family: "product",
-    re: /product\s*manager|product\s*owner|מנהל(?:ת)?\s*מוצר|בעלי?\s*מוצר|\bpm\b|head of product|product\s*analyst|product\s*operations/i,
+    re: /product\s*manager|product\s*owner|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*מוצר|בעלי?\s*מוצר|\bpm\b|head of product|product\s*analyst|product\s*operations/i,
   },
   {
     family: "data_ai",
@@ -105,15 +106,15 @@ const FAMILY_PATTERNS: Array<{ family: RoleFamily; re: RegExp }> = [
   },
   {
     family: "engineering",
-    re: /software\s*engineer|full\s*stack|fullstack|backend|frontend|devops|sre|מפתח(?:ת)?|מהנדס(?:ת)?\s*תוכנה|\bdeveloper\b|\bprogrammer\b/i,
+    re: /software\s*engineer|full\s*stack|fullstack|backend|frontend|devops|sre|מפתח(?:\s*\/\s*ת)?(?:ת)?|מהנדס(?:\s*\/\s*ת)?(?:ת)?\s*תוכנה|\bdeveloper\b|\bprogrammer\b/i,
   },
   {
     family: "finance",
-    re: /fp&a|financial\s*analyst|controller|חשב(?:ת)?|כלכל(?:ן|נית)|fintech|accountant|רואה חשבון/i,
+    re: /fp&a|financial\s*analyst|controller|חשב(?:\s*\/\s*ת)?(?:ת)?|כלכל(?:ן|נית)|fintech|accountant|רואה חשבון|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*חשבונות/i,
   },
   {
     family: "management",
-    re: /project\s*manager|program\s*manager|operations\s*manager|team\s*lead|מנהל(?:ת)?\s*פרויקט|מנהל(?:ת)?\s*תפעול|delivery manager/i,
+    re: /project\s*manager|program\s*manager|operations\s*manager|team\s*lead|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*פרויקט|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*תפעול|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*עבודה|delivery manager/i,
   },
   {
     family: "sales",
@@ -193,7 +194,13 @@ export function isAiRelatedJob(job: {
   title?: string | null;
   description?: string | null;
 }): boolean {
-  return AI_DOMAIN_RE.test(`${job.title || ""} ${job.description || ""}`);
+  const blob = `${job.title || ""} ${job.description || ""}`;
+  // Ignore negated mentions ("no AI", "ללא AI") so classic PM isn't kept by accident
+  const cleaned = blob
+    .replace(/\b(?:no|without|not)\s+ai\b/gi, " ")
+    .replace(/ללא\s*ai/gi, " ")
+    .replace(/בלי\s*ai/gi, " ");
+  return AI_DOMAIN_RE.test(cleaned);
 }
 
 /**
@@ -221,7 +228,8 @@ export function isFamilyMismatchForResume(
   job: { title?: string | null; description?: string | null },
   signals: ResumeSignals,
 ): boolean {
-  if (!signals.families.length) return false;
+  const resumeFamilies = strongResumeFamilies(signals);
+  if (!resumeFamilies.length) return false;
   // Prefer title so JD noise ("work with engineers") doesn't mis-tag the role
   const titleFamilies = detectJobFamilies(job.title || "");
   const jobFamilies =
@@ -231,7 +239,7 @@ export function isFamilyMismatchForResume(
           `${job.title || ""} ${job.description || ""}`.slice(0, 800),
         );
   if (!jobFamilies.length) return false;
-  const shared = jobFamilies.filter((f) => signals.families.includes(f));
+  const shared = jobFamilies.filter((f) => resumeFamilies.includes(f));
   return shared.length === 0;
 }
 
@@ -362,15 +370,16 @@ export function scoreMatch(
       ? titleFamilies
       : detectJobFamilies(`${titleLower} ${haystack}`.slice(0, 900));
 
+  const resumeFamilies = strongResumeFamilies(profile);
   const { score: roleScore, shared } = familyOverlapScore(
-    profile.families,
+    resumeFamilies,
     jobFamilies,
   );
   if (shared.length) {
     reasons.push(
       `תפקיד: ${shared.map((f) => FAMILY_LABEL[f]).join(", ")}`,
     );
-  } else if (profile.families.length && jobFamilies.length) {
+  } else if (resumeFamilies.length && jobFamilies.length) {
     reasons.push("תפקיד שונה מהפרופיל בקו״ח");
   }
 
@@ -382,10 +391,10 @@ export function scoreMatch(
       resumeTitleBlob.includes(t),
     );
     if (titleOverlap.length >= 2) {
-      cvTitleBoost = 0.1;
+      cvTitleBoost = 0.14;
       reasons.push(`כותרת דומה לקו״ח: ${titleOverlap.slice(0, 3).join(", ")}`);
     } else if (titleOverlap.length === 1) {
-      cvTitleBoost = 0.04;
+      cvTitleBoost = 0.06;
     }
   }
 
@@ -459,10 +468,10 @@ export function scoreMatch(
   // Role fit dominates — wrong-family jobs stay low even if "ai" tag matches
   let score = Number(
     (
-      0.42 * roleScore +
-      0.2 * skillScore +
-      0.12 * domainScore +
-      0.08 * overlapScore +
+      0.48 * roleScore +
+      0.18 * skillScore +
+      0.1 * domainScore +
+      0.06 * overlapScore +
       0.1 * titleScore +
       0.05 * senScore +
       0.03 * expScore +
@@ -487,8 +496,8 @@ export function scoreMatch(
   }
 
   // Cap mismatched-family jobs so they don't dominate the pool
-  if (profile.families.length && jobFamilies.length && !shared.length) {
-    score = Math.min(score, 0.28);
+  if (resumeFamilies.length && jobFamilies.length && !shared.length) {
+    score = Math.min(score, 0.24);
   }
 
   // Tiny lexical-only matches shouldn't surface as "good"

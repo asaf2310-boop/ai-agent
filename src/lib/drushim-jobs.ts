@@ -4,6 +4,7 @@
  */
 
 import { extractEmails } from "@/lib/apply-email";
+import { DEFAULT_IL_BOARD_QUERIES } from "@/lib/cv-search-queries";
 import { isRealDrushimJobUrl } from "@/lib/il-boards";
 
 export type DrushimJobRow = {
@@ -25,22 +26,7 @@ export type DrushimJobRow = {
 const UA =
   "Mozilla/5.0 (compatible; ai-agent-job-scanner/1.0; +https://github.com/asaf2310-boop/ai-agent)";
 
-const SEARCHES = [
-  "AI",
-  "בינה מלאכותית",
-  "machine learning",
-  "מנהל מוצר AI",
-  "מנהל מוצר",
-  "data scientist",
-  "אנליסט",
-  "פיננסים",
-  "חשב",
-  "הצלחת לקוחות",
-  "שיווק דיגיטלי",
-  "product owner",
-  "product analyst",
-  "דרוש ניסיון",
-];
+const SEARCHES = DEFAULT_IL_BOARD_QUERIES;
 
 function stripHtml(html: string): string {
   return html
@@ -154,11 +140,13 @@ async function searchDrushimPage(
 /** Fetch diverse Israel jobs from Drushim (real deep-links). */
 export async function fetchDrushimIsraelJobs(opts?: {
   maxJobs?: number;
+  searches?: string[];
 }): Promise<DrushimJobRow[]> {
   const maxJobs = opts?.maxJobs ?? 60;
   const byId = new Map<string, DrushimJobRow>();
+  const terms = opts?.searches?.length ? opts.searches : SEARCHES;
 
-  for (const term of SEARCHES) {
+  for (const term of terms) {
     if (byId.size >= maxJobs) break;
     try {
       const page1 = await searchDrushimPage(term, 1);

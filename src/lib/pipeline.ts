@@ -21,9 +21,13 @@ import {
   isBrokenLinkedInUrl,
   safeJobOpenUrl,
 } from "@/lib/linkedin-url";
+import { fetchAllJobsIsraelJobs } from "@/lib/alljobs-jobs";
 import { fetchCompanyCareerJobs } from "@/lib/company-careers";
+import { buildIlBoardSearchQueries } from "@/lib/cv-search-queries";
 import { fetchDrushimIsraelJobs } from "@/lib/drushim-jobs";
 import { isFakeIlBoardUrl } from "@/lib/il-boards";
+import { fetchJobifyIsraelJobs } from "@/lib/jobify-jobs";
+import { fetchJobMasterIsraelJobs } from "@/lib/jobmaster-jobs";
 import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import {
   applyRejectionPreference,
@@ -146,11 +150,13 @@ async function repairBrokenLinkedInUrls(supabase: DbClient) {
           "source.eq.alljobs",
           "source.eq.drushim",
           "source.eq.jobmaster",
+          "source.eq.jobify",
           "source.eq.jobnet",
           "source.eq.gotfriends",
           "url.ilike.%alljobs.co.il%",
           "url.ilike.%drushim.co.il%",
           "url.ilike.%jobmaster.co.il%",
+          "url.ilike.%jobify360.co.il%",
           "url.ilike.%jobnet.co.il%",
           "url.ilike.%gotfriends.co.il%",
           "url.ilike.%ref=ai-agent%",
@@ -342,8 +348,14 @@ export async function syncLiveSocialJobs(supabase: DbClient) {
 }
 
 /** Live Drushim.co.il postings with real /job/{id}/{hash}/ links. */
-export async function syncDrushimJobs(supabase: DbClient) {
-  const jobs = await fetchDrushimIsraelJobs({ maxJobs: 70 });
+export async function syncDrushimJobs(
+  supabase: DbClient,
+  opts?: { queries?: string[] },
+) {
+  const jobs = await fetchDrushimIsraelJobs({
+    maxJobs: 70,
+    searches: opts?.queries,
+  });
   if (jobs.length) {
     await upsertJobBatch(
       supabase,
@@ -351,6 +363,77 @@ export async function syncDrushimJobs(supabase: DbClient) {
     );
   }
   return jobs.length;
+}
+
+/** Live AllJobs.co.il postings with UploadSingle?JobID= deep-links. */
+export async function syncAllJobsJobs(
+  supabase: DbClient,
+  opts?: { queries?: string[] },
+) {
+  const jobs = await fetchAllJobsIsraelJobs({
+    maxJobs: 70,
+    queries: opts?.queries,
+  });
+  if (jobs.length) {
+    await upsertJobBatch(
+      supabase,
+      jobs.map((j) => ({ ...j })),
+    );
+  }
+  return jobs.length;
+}
+
+/** Live JobMaster.co.il postings (best-effort — board is often slow). */
+export async function syncJobMasterJobs(
+  supabase: DbClient,
+  opts?: { queries?: string[] },
+) {
+  const jobs = await fetchJobMasterIsraelJobs({
+    maxJobs: 40,
+    queries: opts?.queries,
+  });
+  if (jobs.length) {
+    await upsertJobBatch(
+      supabase,
+      jobs.map((j) => ({ ...j })),
+    );
+  }
+  return jobs.length;
+}
+
+/** Live Jobify360.co.il postings via sitemap + JobPosting JSON-LD. */
+export async function syncJobifyJobs(
+  supabase: DbClient,
+  opts?: { queries?: string[] },
+) {
+  const jobs = await fetchJobifyIsraelJobs({
+    maxJobs: 50,
+    queries: opts?.queries,
+  });
+  if (jobs.length) {
+    await upsertJobBatch(
+      supabase,
+      jobs.map((j) => ({ ...j })),
+    );
+  }
+  return jobs.length;
+}
+
+/** Sync AllJobs + JobMaster + Jobify (+ optional query alignment to a CV). */
+export async function syncIsraeliBoards(
+  supabase: DbClient,
+  opts?: { queries?: string[]; signals?: ReturnType<typeof extractResumeSignals> },
+) {
+  const queries =
+    opts?.queries ||
+    (opts?.signals ? buildIlBoardSearchQueries(opts.signals) : undefined);
+  const [drushim, alljobs, jobmaster, jobify] = await Promise.all([
+    syncDrushimJobs(supabase, { queries }),
+    syncAllJobsJobs(supabase, { queries }),
+    syncJobMasterJobs(supabase, { queries }),
+    syncJobifyJobs(supabase, { queries }),
+  ]);
+  return { drushim, alljobs, jobmaster, jobify };
 }
 
 /** LinkedIn active jobs in Israel from the past 7 days (+ prune older). */
@@ -372,7 +455,7 @@ export async function syncLinkedInJobs(supabase: DbClient) {
 export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
-  minScore = Number(process.env.MIN_MATCH_SCORE || "0.32"),
+  minScore = Number(process.env.MIN_MATCH_SCORE || "0.38"),
   userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =
@@ -394,7 +477,7 @@ export async function matchResumeToJobs(
   for (const job of israelJobs) {
     // No developers / project managers / generic Product Manager
     if (shouldExcludeJob(job)) continue;
-    // Keep pool aligned with CV role families
+    // Keep pool aligned with CV role families (title-strong families)
     if (isFamilyMismatchForResume(job, signals)) continue;
 
     const base = scoreMatch(
