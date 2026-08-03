@@ -7,7 +7,7 @@ import {
   matchResumeForAutoApply,
   processApplicationsForResume,
   syncCompanyCareerJobs,
-  syncDrushimJobs,
+  syncIsraeliBoards,
   syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
@@ -48,7 +48,7 @@ async function runAutoApplyCron() {
   // Company ATS boards first — these are what we can actually auto-submit
   const careersSynced = await syncCompanyCareerJobs(supabase);
   await syncLiveSocialJobs(supabase);
-  await syncDrushimJobs(supabase);
+  const ilBoards = await syncIsraeliBoards(supabase);
   await syncLinkedInJobs(supabase);
 
   const { data: resumes, error } = await supabase
@@ -158,6 +158,7 @@ async function runAutoApplyCron() {
     totalSent,
     totalCandidates,
     careersSynced,
+    ilBoards,
     targetSent,
     resendConfigured,
     hint: !resendConfigured
