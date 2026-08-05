@@ -12,7 +12,7 @@ import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { POOL_LIMIT, sortMatchesByBestFit } from "@/lib/match-pool";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildIlBoardSearchQueries } from "@/lib/cv-search-queries";
+import { buildIlBoardSearchQueries, buildLinkedInSearchQueries } from "@/lib/cv-search-queries";
 import {
   ensureSampleJobs,
   matchResumeForAutoApply,
@@ -83,12 +83,13 @@ export async function POST(request: Request) {
       resume.filename;
     const signals = extractResumeSignals(resumeText, resume.skills || []);
     const boardQueries = buildIlBoardSearchQueries(signals);
+    const linkedInQueries = buildLinkedInSearchQueries(signals);
 
     // ATS company boards first — needed for real auto-send
     await syncCompanyCareerJobs(supabase);
     await syncLiveSocialJobs(supabase);
     await syncIsraeliBoards(supabase, { queries: boardQueries, signals });
-    await syncLinkedInJobs(supabase);
+    await syncLinkedInJobs(supabase, { queries: linkedInQueries });
 
     // Ownership check
     if (resume.user_id && resume.user_id !== user.id) {

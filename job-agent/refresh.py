@@ -94,22 +94,26 @@ _PRODUCT_MANAGER_TITLE_RE = re.compile(
     r"associate\s*product\s*manager|technical\s*product\s*manager|"
     r"group\s*product\s*manager|growth\s*product\s*manager|"
     r"platform\s*product\s*manager|head of product|vp\s*product|"
-    r"מנהל(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b",
+    r"מנהל(?:\s*/\s*ת)?(?:ת)?\s*מוצר|בעל(?:י|ת)?\s*מוצר|\bpm\b",
     re.I,
 )
 _DEVELOPER_TITLE_RE = re.compile(
     r"(?:software|frontend|front.?end|backend|back.?end|full.?stack|fullstack|"
-    r"mobile|android|ios|devops|sre|platform|cloud|qa|automation|integration)\s*"
-    r"(?:engineer|developer|programmer)s?|"
+    r"mobile|android|ios|devops|sre|platform|cloud|qa|automation|integration|"
+    r"forward\s*deployed)\s*(?:engineer|developer|programmer)s?|"
+    r"(?:ai|ml|machine\s*learning|llm|data|research|computer\s*vision|nlp|"
+    r"gen(?:erative)?\s*ai)\s*(?:engineer|developer)s?|"
     r"(?:react|angular|vue|node\.?js|java|golang|\.net|php|ruby|salesforce)\s*"
     r"(?:developer|engineer)s?|"
-    r"מפתח(?:ת)?(?:\s|$)|מפתח(?:ת)?\s+(?:תוכנה|full.?stack|frontend|backend|"
-    r"fullstack|mobile|אינטגרציה|אוטומציה)|מהנדס(?:ת)?\s*תוכנה|programmer",
+    r"מפתח(?:\s*/\s*ת)?(?:ת)?(?:\s|$)|מפתח(?:\s*/\s*ת)?(?:ת)?\s+(?:תוכנה|full.?stack|frontend|backend|"
+    r"fullstack|mobile|אינטגרציה|אוטומציה|AI)|מהנדס(?:\s*/\s*ת)?(?:ת)?\s*(?:תוכנה|AI)|programmer|"
+    r"devops\s*engineer",
     re.I,
 )
 _PROJECT_MANAGER_TITLE_RE = re.compile(
     r"(?:ai\s+)?project\s*managers?|program\s*managers?|delivery\s*managers?|"
-    r"implementation\s*managers?|מנהל(?:ת)?\s*פרויקט(?:ים)?|מנהל(?:ת)?\s*תכניות",
+    r"implementation\s*managers?|מנהל(?:\s*/\s*ת)?(?:ת)?\s*פרויקט(?:ים)?|"
+    r"מנהל(?:\s*/\s*ת)?(?:ת)?\s*תכניות|מנהל(?:\s*/\s*ת)?(?:ת)?\s*עבודה",
     re.I,
 )
 _AI_DOMAIN_RE = re.compile(
@@ -179,12 +183,9 @@ def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tup
         0.35 * skill_score + 0.3 * domain_score + 0.2 * overlap_score + 0.15 * title_score,
         4,
     )
-    if score == 0 and (skill_hits or domain_hits or tag_hits or len(overlap) >= 2):
-        score = 0.28
-    if (len(domain_hits) >= 2 or tag_hits) and score < 0.32:
-        score = 0.32
-    if tag_hits and domain_hits and score < 0.38:
-        score = 0.38
+    # No soft floors that push weak lexical hits into the pool
+    if title_score < 0.5 and len(skill_hits) < 2:
+        score = min(score, 0.35)
 
     desc = job.get("description") or ""
     title = job.get("title") or ""
@@ -193,11 +194,11 @@ def score_match(resume_text: str, skills: list[str], job: dict[str, Any]) -> tup
         if len(desc.strip()) >= 40
         else _hebrew_ratio(f"{title} {desc}") >= 0.35
     )
-    if hebrew_ok:
-        score = min(1.0, round(score + 0.08, 4))
+    if hebrew_ok and title_score >= 0.5:
+        score = min(1.0, round(score + 0.06, 4))
         reasons.append("דרישות בעברית")
-    else:
-        score = max(0.0, round(score - 0.03, 4))
+    elif not hebrew_ok:
+        score = max(0.0, round(score - 0.02, 4))
 
     if not reasons:
         reasons.append("partial profile overlap" if score > 0 else "weak lexical overlap")
@@ -655,7 +656,7 @@ def process_applications(client: Client, matches: list[dict[str, Any]]) -> int:
 
 def run() -> None:
     schema = os.getenv("SUPABASE_SCHEMA", "job_agent")
-    min_score = float(os.getenv("MIN_MATCH_SCORE", "0.2"))
+    min_score = float(os.getenv("MIN_MATCH_SCORE", "0.42"))
     max_age_days = int(os.getenv("MAX_JOB_AGE_DAYS", "7"))
 
     from linkedin_jobs import prune_old_linkedin_jobs

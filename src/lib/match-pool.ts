@@ -1,7 +1,11 @@
 import type { Job, JobMatch } from "@/lib/types";
 import { isLiveBoardSource } from "@/lib/il-boards";
 import { hasActiveJobLink } from "@/lib/linkedin-url";
-import { shouldExcludeJob } from "@/lib/matching";
+import {
+  isFamilyMismatchForResume,
+  shouldExcludeJob,
+} from "@/lib/matching";
+import type { ResumeSignals } from "@/lib/resume-extract";
 import { canAutoSendJob } from "@/lib/web-apply";
 
 export const POOL_LIMIT = 50;
@@ -175,14 +179,17 @@ function matchesPostedDate(
 export function filterMatches(
   matches: JobMatch[],
   filters: MatchPoolFilters,
+  signals?: ResumeSignals | null,
 ): JobMatch[] {
   return matches.filter((m) => {
     const job = m.jobs;
     if (!hasActiveJobLink(job)) return false;
     // Auto-sendable jobs are handled by scan/cron — pool is manual-only
     if (canAutoSendJob(job)) return false;
-    // No generic Product Manager (AI PM ok)
+    // No generic Product Manager (AI PM ok) / developers / project managers
     if (job && shouldExcludeJob(job)) return false;
+    // Drop roles whose title family clearly doesn't fit the CV
+    if (job && signals && isFamilyMismatchForResume(job, signals)) return false;
     return (
       matchesKind(job, filters.kind) &&
       matchesLocation(job, filters.location) &&
@@ -196,8 +203,12 @@ export function buildPoolMatches(
   matches: JobMatch[],
   filters: MatchPoolFilters = DEFAULT_POOL_FILTERS,
   limit = POOL_LIMIT,
+  signals?: ResumeSignals | null,
 ): JobMatch[] {
-  return sortMatchesByBestFit(filterMatches(matches, filters)).slice(0, limit);
+  return sortMatchesByBestFit(filterMatches(matches, filters, signals)).slice(
+    0,
+    limit,
+  );
 }
 
 export function uniqueLocations(matches: JobMatch[]): string[] {

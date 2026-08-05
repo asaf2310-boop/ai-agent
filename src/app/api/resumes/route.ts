@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildIlBoardSearchQueries } from "@/lib/cv-search-queries";
+import { buildIlBoardSearchQueries, buildLinkedInSearchQueries } from "@/lib/cv-search-queries";
 import {
   ensureSampleJobs,
   matchResumeToJobs,
@@ -160,13 +160,15 @@ export async function POST(request: Request) {
     const resume = data as Resume;
 
     await ensureSampleJobs(supabase);
-    const boardQueries = buildIlBoardSearchQueries(
-      extractedText ? extractResumeSignals(extractedText) : null,
-    );
+    const boardQueries = buildIlBoardSearchQueries(signals);
+    const linkedInQueries = buildLinkedInSearchQueries(signals);
     await syncLiveSocialJobs(supabase);
-    await syncIsraeliBoards(supabase, { queries: boardQueries });
+    await syncIsraeliBoards(supabase, {
+      queries: boardQueries,
+      signals: signals || undefined,
+    });
     await syncCompanyCareerJobs(supabase);
-    await syncLinkedInJobs(supabase);
+    await syncLinkedInJobs(supabase, { queries: linkedInQueries });
     const matches = await matchResumeToJobs(supabase, resume, undefined, user.id);
     const applications = await processApplicationsForResume(
       supabase,

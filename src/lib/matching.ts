@@ -300,18 +300,19 @@ function familyOverlapScore(
   jobFamilies: RoleFamily[],
 ): { score: number; shared: RoleFamily[] } {
   if (!jobFamilies.length) {
-    return { score: resumeFamilies.length ? 0.35 : 0.2, shared: [] };
+    // Unknown job family — don't gift a mid score that clears the pool floor
+    return { score: resumeFamilies.length ? 0.12 : 0.15, shared: [] };
   }
   if (!resumeFamilies.length) {
-    return { score: 0.15, shared: [] };
+    return { score: 0.12, shared: [] };
   }
   const shared = jobFamilies.filter((f) => resumeFamilies.includes(f));
   if (!shared.length) {
     // Hard mismatch between clear role families (e.g. finance CV vs pure eng job)
-    return { score: 0.05, shared: [] };
+    return { score: 0.04, shared: [] };
   }
   const ratio = shared.length / Math.max(jobFamilies.length, 1);
-  return { score: Math.min(1, 0.45 + ratio * 0.55), shared };
+  return { score: Math.min(1, 0.5 + ratio * 0.5), shared };
 }
 
 function seniorityScore(
@@ -468,55 +469,84 @@ export function scoreMatch(
   // Role fit dominates — wrong-family jobs stay low even if "ai" tag matches
   let score = Number(
     (
-      0.48 * roleScore +
+      0.52 * roleScore +
       0.18 * skillScore +
-      0.1 * domainScore +
-      0.06 * overlapScore +
+      0.08 * domainScore +
+      0.05 * overlapScore +
       0.1 * titleScore +
-      0.05 * senScore +
+      0.04 * senScore +
       0.03 * expScore +
       cvTitleBoost
     ).toFixed(4),
   );
 
-  // Soft floor only when role actually aligns
-  if (shared.length && score < 0.34 && (skillHits.length || titleHits.length >= 2)) {
-    score = 0.34;
-  }
-  if (shared.length >= 1 && skillHits.length >= 2 && score < 0.45) {
-    score = Math.max(score, 0.45);
+  // Soft floors only with real title evidence — not skill-tag coincidence
+  if (
+    shared.length &&
+    titleHits.length >= 2 &&
+    skillHits.length >= 1 &&
+    score < 0.42
+  ) {
+    score = 0.42;
   }
   if (
     shared.length >= 1 &&
     titleSkillHits.length >= 1 &&
     skillHits.length >= 2 &&
-    score < 0.55
+    titleHits.length >= 1 &&
+    score < 0.52
   ) {
-    score = Math.max(score, 0.55);
+    score = Math.max(score, 0.52);
   }
 
   // Cap mismatched-family jobs so they don't dominate the pool
   if (resumeFamilies.length && jobFamilies.length && !shared.length) {
-    score = Math.min(score, 0.24);
+    score = Math.min(score, 0.2);
+  }
+
+  // Unknown job family + no title overlap → keep below pool floor
+  if (!jobFamilies.length && titleHits.length < 2) {
+    score = Math.min(score, 0.28);
   }
 
   // Tiny lexical-only matches shouldn't surface as "good"
   if (!shared.length && skillHits.length === 0 && titleHits.length < 2) {
-    score = Math.min(score, 0.22);
+    score = Math.min(score, 0.18);
   }
 
-  // Prefer postings whose requirements are written in Hebrew
-  if (hasHebrewRequirements(job)) {
-    score = Math.min(1, Number((score + 0.08).toFixed(4)));
+  // Prefer Hebrew JDs only when the role already fits
+  if (hasHebrewRequirements(job) && shared.length) {
+    score = Math.min(1, Number((score + 0.06).toFixed(4)));
     reasons.push("דרישות בעברית");
-  } else {
-    // Slightly demote English-only JDs so Hebrew ones rise in the pool
-    score = Math.max(0, Number((score - 0.03).toFixed(4)));
+  } else if (!hasHebrewRequirements(job) && shared.length) {
+    score = Math.max(0, Number((score - 0.02).toFixed(4)));
+  }
+
+  // AI-leaning Product CV: boost AI Product titles, demote classic PM without AI
+  if (
+    resumeFamilies.includes("product") &&
+    resumeIsAiProductProfile(profile) &&
+    isProductManagerTitle(job.title)
+  ) {
+    if (isAiRelatedJob(job)) {
+      score = Math.min(1, Number((score + 0.08).toFixed(4)));
+      reasons.push("מוצר AI");
+    } else {
+      score = Math.min(score, 0.3);
+      reasons.push("מוצר כללי — פחות רלוונטי לקו״ח AI");
+    }
   }
 
   if (!reasons.length) {
-    reasons.push(score >= 0.35 ? "התאמה חלקית לפרופיל" : "התאמה חלשה לקו״ח");
+    reasons.push(score >= 0.4 ? "התאמה חלקית לפרופיל" : "התאמה חלשה לקו״ח");
   }
 
   return { score, reasons: reasons.slice(0, 6) };
+}
+
+function resumeIsAiProductProfile(profile: ResumeSignals): boolean {
+  const blob = [...profile.titles, ...profile.skills, ...profile.domains].join(
+    " ",
+  );
+  return /ai|llm|בינה|gen(?:erative)?\s*ai|machine learning/i.test(blob);
 }

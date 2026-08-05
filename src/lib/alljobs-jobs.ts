@@ -189,6 +189,14 @@ export async function fetchAllJobsIsraelJobs(opts?: {
         `https://www.alljobs.co.il/SearchResultsGuest.aspx?${params}`,
       );
       for (const row of parseAllJobsHtml(html)) {
+        if (
+          !matchesSearchQueries(
+            `${row.title} ${row.description} ${row.company || ""}`,
+            queries,
+          )
+        ) {
+          continue;
+        }
         byId.set(row.external_id, row);
         if (byId.size >= maxJobs) break;
       }

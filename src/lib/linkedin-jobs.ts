@@ -36,16 +36,15 @@ const PAST_WEEK = "r604800";
 /** Israel geoId used by LinkedIn public search */
 const ISRAEL_GEO = "101620260";
 
-const SEARCHES = [
-  "AI OR LLM OR \"machine learning\" OR \"data scientist\" OR \"בינה מלאכותית\"",
-  "\"AI product manager\" OR \"AI product owner\" OR \"product manager AI\" OR \"LLM product\" OR \"מנהל מוצר AI\"",
-  "אנליסט OR חשב OR \"הצלחת לקוחות\" OR שיווק OR \"product analyst\"",
-  "finance OR fintech OR FP&A OR controller OR \"financial analyst\" OR פיננסים",
-  "\"product owner\" OR \"product marketing\" OR \"customer success\" OR operations",
+const DEFAULT_SEARCHES = [
+  "\"AI product manager\" OR \"AI product owner\" OR \"מנהל מוצר AI\" OR \"LLM product\"",
+  "\"product manager\" AND (AI OR LLM OR \"Gen AI\" OR \"בינה מלאכותית\")",
+  "\"product owner\" AND (AI OR LLM OR \"machine learning\")",
+  "\"product analyst\" OR \"אנליסט מוצר\"",
 ];
 
 const RELEVANT =
-  /ai|llm|machine learning|data scientist|data analyst|product|finance|fintech|fp&a|controller|analyst|marketing|sales|customer success|מוצר|פיננס|בינה|שיווק|מכירות|אנליסט/i;
+  /ai|llm|machine learning|data scientist|data analyst|product manager|product owner|product analyst|finance|fintech|fp&a|controller|marketing|customer success|מנהל מוצר|בעל מוצר|פיננס|בינה|שיווק|הצלחת לקוחות|אנליסט מוצר/i;
 
 function decodeHtml(s: string): string {
   return s
@@ -171,13 +170,16 @@ function withinLastWeek(postedAt: string | null): boolean {
 export async function fetchLinkedInIsraelJobs(options?: {
   maxJobs?: number;
   enrichDescriptions?: number;
+  searches?: string[];
 }): Promise<LinkedInJobRow[]> {
   const maxJobs = options?.maxJobs ?? 80;
   const enrichN = options?.enrichDescriptions ?? 25;
+  const searches =
+    options?.searches?.length ? options.searches : DEFAULT_SEARCHES;
   const now = new Date().toISOString();
   const byId = new Map<string, LinkedInJobRow>();
 
-  for (const keywords of SEARCHES) {
+  for (const keywords of searches) {
     for (const start of [0, 25]) {
       try {
         const html = await fetchSearchPage(keywords, start);
