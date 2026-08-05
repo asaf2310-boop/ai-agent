@@ -78,6 +78,7 @@ export function HomeClient({ email }: { email?: string | null }) {
   });
   const [restoreBusyId, setRestoreBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [showHomeCvUpload, setShowHomeCvUpload] = useState(false);
   /** Jobs opened via «פתח באתר» — finalize to History when user returns. */
   const pendingSiteOpens = useRef<PendingSiteOpen[]>(readPendingSiteOpens());
   const flushingSiteOpens = useRef(false);
@@ -103,7 +104,7 @@ export function HomeClient({ email }: { email?: string | null }) {
       try {
         const qs = resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : "";
         const res = await fetch(`/api/matches${qs}`);
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         if (res.ok) {
           const incoming = (json.matches ?? []) as JobMatch[];
           // Never re-show jobs dismissed in this browser session
@@ -114,11 +115,21 @@ export function HomeClient({ email }: { email?: string | null }) {
                 !dismissedJobIds.has(m.jobs?.id || ""),
             ),
           );
-        } else if (!opts?.quiet) {
-          setMessage(json.error || "טעינת התאמות נכשלה");
+          return incoming.length;
         }
+        if (!opts?.quiet) {
+          setMessage(
+            typeof json.error === "string" && json.error.trim()
+              ? json.error
+              : "טעינת המשרות נכשלה — נסה רענון",
+          );
+        }
+        return 0;
       } catch {
-        if (!opts?.quiet) setMessage("טעינת התאמות נכשלה");
+        if (!opts?.quiet) {
+          setMessage("טעינת המשרות נכשלה — בדוק חיבור ונסה שוב");
+        }
+        return 0;
       } finally {
         if (!opts?.quiet) setLoadingMatches(false);
       }
@@ -155,22 +166,35 @@ export function HomeClient({ email }: { email?: string | null }) {
 
   const loadSavedResume = useCallback(async () => {
     setLoadingResume(true);
+    setMessage(null);
     try {
       const res = await fetch("/api/resumes");
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (res.ok && json.resume) {
         setResume(json.resume as Resume);
-        setMessage("נטען קו״ח שמור");
-        await Promise.all([
+        const [matchCount] = await Promise.all([
           loadMatches(json.resume.id),
           loadApplications(json.resume.id),
         ]);
+        if (matchCount === 0) {
+          setMessage(
+            "הפול ריק — לחץ «הפעל סריקה» כדי למצוא משרות חדשות לפי הקו״ח",
+          );
+        }
         return;
       }
       if (!res.ok) {
-        setMessage(json.error || "טעינת קו״ח נכשלה");
+        setMessage(
+          typeof json.error === "string" && json.error.trim()
+            ? json.error
+            : "טעינת הקו״ח נכשלה",
+        );
       }
       await Promise.all([loadMatches(), loadApplications()]);
+    } catch {
+      setMessage("טעינה נכשלה — בדוק חיבור ונסה שוב");
+      setLoadingMatches(false);
+      setLoadingApps(false);
     } finally {
       setLoadingResume(false);
     }
@@ -456,12 +480,52 @@ export function HomeClient({ email }: { email?: string | null }) {
     meta?: { matches?: JobMatch[]; applications?: Application[] },
   ) {
     setResume(next);
+    setShowHomeCvUpload(false);
     if (meta?.applications) {
       setApplications(meta.applications as Application[]);
     }
-    await Promise.all([loadMatches(next.id), loadApplications(next.id)]);
-    setMessage("הקו״ח נשמר");
+    if (meta?.matches) {
+      setMatches(
+        (meta.matches as JobMatch[]).filter(
+          (m) =>
+            !dismissedJobIds.has(m.job_id) &&
+            !dismissedJobIds.has(m.jobs?.id || ""),
+        ),
+      );
+    } else {
+      await Promise.all([loadMatches(next.id), loadApplications(next.id)]);
+    }
+    setMessage("הקו״ח עודכן — מריץ סריקה לפי הפרופיל החדש…");
     setTab("home");
+    setPipelineBusy(true);
+    try {
+      const res = await fetch("/api/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeId: next.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await Promise.all([loadMatches(next.id), loadApplications(next.id)]);
+        const sent = json.sentCount ?? 0;
+        setMessage(
+          sent > 0
+            ? `הקו״ח עודכן · נשלחו ${sent} משרות אוטומטית · בפול ${Math.min(json.matchesCount ?? 0, 50)}`
+            : `הקו״ח עודכן · בפול ${Math.min(json.matchesCount ?? 0, 50)} משרות להגשה ידנית`,
+        );
+        if ((json.matchesCount ?? 0) > 0) setTab("pool");
+      } else {
+        setMessage(
+          typeof json.error === "string"
+            ? `הקו״ח נשמר, אך הסריקה נכשלה: ${json.error}`
+            : "הקו״ח נשמר — לחץ סריקה ידנית",
+        );
+      }
+    } catch {
+      setMessage("הקו״ח נשמר — לחץ «הפעל סריקה» לרענון המשרות");
+    } finally {
+      setPipelineBusy(false);
+    }
   }
 
   async function runPipeline() {
@@ -596,19 +660,46 @@ export function HomeClient({ email }: { email?: string | null }) {
                     ? "הפעל סריקה + הגשה אוטומטית"
                     : "העלה קו״ח כדי להתחיל"}
               </button>
+
               {!resume && (
-                <button
-                  type="button"
-                  onClick={() => setTab("cv")}
-                  className="w-full rounded-2xl border border-[var(--border)] bg-white/70 px-4 py-3 text-sm font-medium"
-                >
-                  העלאת קורות חיים
-                </button>
+                <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-white/70 p-4">
+                  <p className="text-sm font-medium text-[var(--ink)]">
+                    העלאת קורות חיים
+                  </p>
+                  <ResumeUpload onUploaded={handleUploaded} />
+                </div>
               )}
+
               {resume && (
-                <p className="text-center text-xs text-[var(--muted)]">
-                  קו״ח פעיל: {resume.filename}
-                </p>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowHomeCvUpload((v) => !v)}
+                      className="rounded-xl border border-[var(--border)] bg-white/80 px-4 py-2.5 text-sm font-semibold text-[var(--ink)]"
+                    >
+                      {showHomeCvUpload ? "סגור עדכון קו״ח" : "עדכון קו״ח"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTab("cv")}
+                      className="rounded-xl border border-transparent px-3 py-2.5 text-sm text-[var(--muted)] underline-offset-2 hover:underline"
+                    >
+                      פרטי מילוי אוטומטי
+                    </button>
+                  </div>
+                  <p className="text-center text-xs text-[var(--muted)]">
+                    קו״ח פעיל: {resume.filename}
+                  </p>
+                  {showHomeCvUpload && (
+                    <div className="rounded-2xl border border-[var(--border)] bg-white/80 p-4">
+                      <p className="mb-2 text-sm text-[var(--muted)]">
+                        העלה קובץ חדש — נחליף את הקו״ח ונריץ סריקה מותאמת
+                      </p>
+                      <ResumeUpload onUploaded={handleUploaded} />
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </section>

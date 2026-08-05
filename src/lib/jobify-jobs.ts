@@ -170,8 +170,8 @@ export async function fetchJobifyIsraelJobs(opts?: {
   signals?: ResumeSignals | null;
   candidateUrls?: number;
 }): Promise<JobifyJobRow[]> {
-  const maxJobs = opts?.maxJobs ?? 50;
-  const candidateUrls = opts?.candidateUrls ?? 180;
+  const maxJobs = opts?.maxJobs ?? 40;
+  const candidateUrls = opts?.candidateUrls ?? 80;
   const queries =
     opts?.queries || buildIlBoardSearchQueries(opts?.signals, 10);
 

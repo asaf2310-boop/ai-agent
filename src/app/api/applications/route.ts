@@ -88,6 +88,10 @@ export async function GET(request: Request) {
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to load applications";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const he =
+      message === "Failed to load applications"
+        ? "טעינת ההיסטוריה נכשלה"
+        : message;
+    return NextResponse.json({ error: he }, { status: 500 });
   }
 }

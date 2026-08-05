@@ -28,6 +28,27 @@ import type { Application, Resume } from "@/lib/types";
 import { shouldExcludeJob } from "@/lib/matching";
 import { canAutoSendJob } from "@/lib/web-apply";
 
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const { user, response } = await requireUser();
@@ -72,7 +93,7 @@ export async function POST(request: Request) {
     const resume = (resumes?.[0] || null) as Resume | null;
     if (!resume) {
       return NextResponse.json(
-        { error: "No resume found — upload a CV first" },
+        { error: "לא נמצא קו״ח — העלה קובץ קודם" },
         { status: 400 },
       );
     }
@@ -85,11 +106,19 @@ export async function POST(request: Request) {
     const boardQueries = buildIlBoardSearchQueries(signals);
     const linkedInQueries = buildLinkedInSearchQueries(signals);
 
-    // ATS company boards first — needed for real auto-send
-    await syncCompanyCareerJobs(supabase);
-    await syncLiveSocialJobs(supabase);
-    await syncIsraeliBoards(supabase, { queries: boardQueries, signals });
-    await syncLinkedInJobs(supabase, { queries: linkedInQueries });
+    // ATS + boards — time-boxed so Vercel doesn't kill the whole scan
+    await withTimeout(syncCompanyCareerJobs(supabase), 45_000, 0);
+    await withTimeout(syncLiveSocialJobs(supabase), 35_000, 0);
+    await withTimeout(
+      syncIsraeliBoards(supabase, { queries: boardQueries, signals }),
+      90_000,
+      { drushim: 0, alljobs: 0, jobmaster: 0, jobify: 0 },
+    );
+    await withTimeout(
+      syncLinkedInJobs(supabase, { queries: linkedInQueries }),
+      45_000,
+      0,
+    );
 
     // Ownership check
     if (resume.user_id && resume.user_id !== user.id) {
@@ -216,7 +245,7 @@ export async function POST(request: Request) {
       applications: historyApps,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Pipeline failed";
+    const message = err instanceof Error ? err.message : "הסריקה נכשלה";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

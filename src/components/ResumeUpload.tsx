@@ -32,7 +32,7 @@ export function ResumeUpload({ onUploaded }: Props) {
       const json = await res.json();
 
       if (!res.ok) {
-        throw new Error(json.error || "Upload failed");
+        throw new Error(json.error || "ההעלאה נכשלה");
       }
 
       onUploaded(json.resume as Resume, {
@@ -40,7 +40,7 @@ export function ResumeUpload({ onUploaded }: Props) {
         applications: json.applications,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : "ההעלאה נכשלה");
     } finally {
       setBusy(false);
       event.target.value = "";
