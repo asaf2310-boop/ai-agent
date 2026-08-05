@@ -18,7 +18,6 @@ import { matchResumeToJobs } from "@/lib/pipeline";
 import { extractResumeSignals } from "@/lib/resume-extract";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { JobMatch, Resume } from "@/lib/types";
-import { isPoolAutoTrackJob } from "@/lib/web-apply";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -57,7 +56,7 @@ export async function GET(request: Request) {
     const resumeId = searchParams.get("resumeId");
     const filters = parseFilters(searchParams);
     const minScore = Number(
-      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.32",
+      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.28",
     );
 
     const supabase = createAdminClient();
@@ -174,7 +173,6 @@ export async function GET(request: Request) {
           return false;
         }
         if (!hasActiveJobLink(job)) return false;
-        if (isPoolAutoTrackJob(job)) return false;
         if (job && shouldExcludeJob(job)) return false;
         if (job && signals && isFamilyMismatchForResume(job, signals)) {
           return false;
@@ -202,7 +200,6 @@ export async function GET(request: Request) {
               return false;
             }
             if (!hasActiveJobLink(job)) return false;
-            if (isPoolAutoTrackJob(job)) return false;
             if (job && shouldExcludeJob(job)) return false;
             return true;
           }),

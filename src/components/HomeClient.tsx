@@ -562,7 +562,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               (!json.resendConfigured
                 ? " · חסר RESEND_API_KEY ב-Vercel לשליחת מייל"
                 : "") +
-              ` · בפול ${Math.min(json.matchesCount ?? 0, 50)} ידניות`,
+              ` · בפול ${Math.min(json.matchesCount ?? 0, 50)} משרות`,
       );
       setTab(sent > 0 ? "history" : "pool");
     } catch (err) {
@@ -711,7 +711,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight">פול התאמות</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  רק משרות להגשה ידנית · אוטומטי היום {autoTodayUsed}/
+                  משרות מותאמות לקו״ח · אוטומטי היום {autoTodayUsed}/
                   {autoTodayQuota}
                 </p>
               </div>

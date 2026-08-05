@@ -330,7 +330,7 @@ export function MatchList({
       )}
 
       <p className="text-sm text-[var(--muted)]">
-        עד {POOL_LIMIT} משרות להגשה ידנית · המתאימות ביותר לקו״ח קודם
+        עד {POOL_LIMIT} משרות מותאמות לקו״ח · המתאימות ביותר קודם
         {matches.length > 0
           ? ` · מוצגות ${filtered.length} מתוך ${filteredCount} אחרי סינון (${matches.length} זמינות)`
           : ""}
@@ -338,9 +338,8 @@ export function MatchList({
 
       {matches.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          אין כרגע משרות להגשה ידנית. משרות שאפשר לשלוח אליהן אוטומטית (מייל /
-          ATS) עוברות בסריקה להיסטוריה — לא לפול. לחץ ״הפעל סריקה + הגשה
-          אוטומטית״ לרענון.
+          הפול ריק. לחץ «סריקה» כדי למצוא משרות לפי הקו״ח — משרות שנשלחו
+          אוטומטית עוברות להיסטוריה; השאר נשארות כאן להגשה ידנית.
         </p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
