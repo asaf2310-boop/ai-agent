@@ -1,4 +1,8 @@
-import { resolveEmployerEmail } from "@/lib/apply-email";
+import {
+  isSyntheticApplyEmail,
+  normalizeApplyEmail,
+  resolveEmployerEmail,
+} from "@/lib/apply-email";
 import {
   extractCandidateProfile,
   type CandidateProfile,
@@ -43,8 +47,8 @@ export function canAutoApplyJob(job: {
 }
 
 /**
- * True when the daily scan / pipeline can auto-send (employer email or ATS form).
- * Pool UI must exclude these — only manual jobs stay in the pool.
+ * True when scan/cron should try auto-send (employer email or ATS).
+ * Used for the auto-apply path — NOT for emptying the manual pool.
  */
 export function canAutoSendJob(job: {
   url?: string | null;
@@ -54,6 +58,22 @@ export function canAutoSendJob(job: {
 } | null | undefined): boolean {
   if (!job) return false;
   if (resolveEmployerEmail(job)) return true;
+  return canAutoApplyJob(job);
+}
+
+/**
+ * Jobs kept off the manual pool (stored apply_email or known ATS URL).
+ * Emails only mentioned in the JD still show in the pool until actually sent.
+ */
+export function isPoolAutoTrackJob(job: {
+  url?: string | null;
+  description?: string | null;
+  apply_email?: string | null;
+  company?: string | null;
+} | null | undefined): boolean {
+  if (!job) return false;
+  const stored = normalizeApplyEmail(job.apply_email);
+  if (stored && !isSyntheticApplyEmail(stored)) return true;
   return canAutoApplyJob(job);
 }
 

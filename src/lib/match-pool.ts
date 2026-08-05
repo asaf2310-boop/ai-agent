@@ -6,7 +6,7 @@ import {
   shouldExcludeJob,
 } from "@/lib/matching";
 import type { ResumeSignals } from "@/lib/resume-extract";
-import { canAutoSendJob } from "@/lib/web-apply";
+import { isPoolAutoTrackJob } from "@/lib/web-apply";
 
 export const POOL_LIMIT = 50;
 
@@ -184,8 +184,8 @@ export function filterMatches(
   return matches.filter((m) => {
     const job = m.jobs;
     if (!hasActiveJobLink(job)) return false;
-    // Auto-sendable jobs are handled by scan/cron — pool is manual-only
-    if (canAutoSendJob(job)) return false;
+    // ATS / stored-email jobs go through auto-send — pool stays manual links
+    if (isPoolAutoTrackJob(job)) return false;
     // No generic Product Manager (AI PM ok) / developers / project managers
     if (job && shouldExcludeJob(job)) return false;
     // Drop roles whose title family clearly doesn't fit the CV

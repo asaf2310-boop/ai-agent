@@ -84,6 +84,11 @@ export function strongResumeFamilies(signals: ResumeSignals): RoleFamily[] {
   for (const t of signals.titles) {
     const lower = t.toLowerCase().trim();
     if (/product/.test(lower)) fromTitles.add("product");
+    // Product analysts often fit data/analytics postings too
+    if (/product\s*analyst|אנליסט/.test(lower)) {
+      fromTitles.add("product");
+      fromTitles.add("data_ai");
+    }
     // Soft title "ai / ml" from domain patterns — only count if product isn't primary
     if (/^ai\s*\/?\s*ml$|^data$/.test(lower)) continue;
     if (/\b(data scientist|data analyst|machine learning)\b/.test(lower)) {
