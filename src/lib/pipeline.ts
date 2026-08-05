@@ -437,10 +437,14 @@ export async function syncIsraeliBoards(
 }
 
 /** LinkedIn active jobs in Israel from the past 7 days (+ prune older). */
-export async function syncLinkedInJobs(supabase: DbClient) {
+export async function syncLinkedInJobs(
+  supabase: DbClient,
+  opts?: { queries?: string[] },
+) {
   const jobs = await fetchLinkedInIsraelJobs({
     maxJobs: 80,
     enrichDescriptions: 20,
+    searches: opts?.queries,
   });
   if (jobs.length) {
     await upsertJobBatch(
@@ -455,7 +459,7 @@ export async function syncLinkedInJobs(supabase: DbClient) {
 export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
-  minScore = Number(process.env.MIN_MATCH_SCORE || "0.38"),
+  minScore = Number(process.env.MIN_MATCH_SCORE || "0.42"),
   userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =
@@ -530,7 +534,7 @@ export async function matchResumeForAutoApply(
   const signals = extractResumeSignals(resumeText, resume.skills || []);
   const ownerId = userId || resume.user_id;
   const rejections = await loadRejectionProfile(supabase, ownerId);
-  const minScore = Number(process.env.AUTO_APPLY_MIN_MATCH_SCORE || "0.18");
+  const minScore = Number(process.env.AUTO_APPLY_MIN_MATCH_SCORE || "0.28");
 
   const { data: jobs, error } = await supabase.from("jobs").select("*");
   if (error) throw new Error(error.message);
@@ -547,6 +551,7 @@ export async function matchResumeForAutoApply(
     if (!isIsraelLocation(job.location, job.description, job.company)) continue;
     if (!hasActiveJobLink(job)) continue;
     if (shouldExcludeJob(job)) continue;
+    if (isFamilyMismatchForResume(job, signals)) continue;
     // Must be auto-sendable now, or look fetchable (non-social career page)
     const autoNow = canAutoSendJob(job);
     const maybeFetchEmail =

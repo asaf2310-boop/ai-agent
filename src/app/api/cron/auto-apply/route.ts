@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { wasSentToEmployer } from "@/lib/apply-email";
+import {
+  buildIlBoardSearchQueries,
+  buildLinkedInSearchQueries,
+} from "@/lib/cv-search-queries";
 import { getDailyAutoApplyUsage } from "@/lib/daily-quota";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -11,6 +15,7 @@ import {
   syncLinkedInJobs,
   syncLiveSocialJobs,
 } from "@/lib/pipeline";
+import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Resume } from "@/lib/types";
 
 export const maxDuration = 300;
@@ -45,11 +50,38 @@ async function runAutoApplyCron() {
   );
 
   await ensureSampleJobs(supabase);
+
+  // Collect CV-driven queries from active resumes before scraping boards
+  const { data: resumesForQueries } = await supabase
+    .from("resumes")
+    .select("*")
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  const boardQuerySet = new Set<string>();
+  const linkedInQuerySet = new Set<string>();
+  for (const row of resumesForQueries || []) {
+    const r = row as Resume;
+    const text =
+      r.extracted_text || (r.skills || []).join(" ") || r.filename || "";
+    const signals = extractResumeSignals(text, r.skills || []);
+    for (const q of buildIlBoardSearchQueries(signals, 8)) boardQuerySet.add(q);
+    for (const q of buildLinkedInSearchQueries(signals, 4)) {
+      linkedInQuerySet.add(q);
+    }
+  }
+  const boardQueries = boardQuerySet.size
+    ? [...boardQuerySet].slice(0, 16)
+    : undefined;
+  const linkedInQueries = linkedInQuerySet.size
+    ? [...linkedInQuerySet].slice(0, 8)
+    : undefined;
+
   // Company ATS boards first — these are what we can actually auto-submit
   const careersSynced = await syncCompanyCareerJobs(supabase);
   await syncLiveSocialJobs(supabase);
-  const ilBoards = await syncIsraeliBoards(supabase);
-  await syncLinkedInJobs(supabase);
+  const ilBoards = await syncIsraeliBoards(supabase, { queries: boardQueries });
+  await syncLinkedInJobs(supabase, { queries: linkedInQueries });
 
   const { data: resumes, error } = await supabase
     .from("resumes")

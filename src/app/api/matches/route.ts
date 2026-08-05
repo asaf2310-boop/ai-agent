@@ -10,8 +10,13 @@ import {
   uniqueLocations,
   type MatchPoolFilters,
 } from "@/lib/match-pool";
+import {
+  isFamilyMismatchForResume,
+  shouldExcludeJob,
+} from "@/lib/matching";
+import { extractResumeSignals } from "@/lib/resume-extract";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { shouldExcludeJob } from "@/lib/matching";
+import type { Resume } from "@/lib/types";
 import { canAutoSendJob } from "@/lib/web-apply";
 
 function parseFilters(searchParams: URLSearchParams): MatchPoolFilters {
@@ -48,10 +53,48 @@ export async function GET(request: Request) {
     const resumeId = searchParams.get("resumeId");
     const filters = parseFilters(searchParams);
     const minScore = Number(
-      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.32",
+      searchParams.get("minScore") || process.env.MIN_MATCH_SCORE || "0.42",
     );
 
     const supabase = createAdminClient();
+
+    // Load resume signals so we can drop family-mismatched rows written by older scrapers
+    let signals = null as ReturnType<typeof extractResumeSignals> | null;
+    try {
+      let resumeQ = supabase
+        .from("resumes")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (resumeId) {
+        resumeQ = supabase
+          .from("resumes")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("id", resumeId)
+          .limit(1);
+      } else {
+        resumeQ = supabase
+          .from("resumes")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .order("created_at", { ascending: false })
+          .limit(1);
+      }
+      const { data: resumes } = await resumeQ;
+      const resume = (resumes?.[0] || null) as Resume | null;
+      if (resume) {
+        const text =
+          resume.extracted_text ||
+          (resume.skills || []).join(" ") ||
+          resume.filename;
+        signals = extractResumeSignals(text, resume.skills || []);
+      }
+    } catch {
+      // best-effort — still return score-filtered matches
+    }
 
     let query = supabase
       .from("job_matches")
@@ -120,14 +163,19 @@ export async function GET(request: Request) {
     }
 
     const available = sortMatchesByBestFit(
-      matches.filter(
-        (m) =>
-          !clearedJobIds.has(m.job_id) &&
-          !clearedJobIds.has(m.jobs?.id || "") &&
-          hasActiveJobLink(m.jobs) &&
-          !canAutoSendJob(m.jobs) &&
-          !(m.jobs && shouldExcludeJob(m.jobs)),
-      ),
+      matches.filter((m) => {
+        const job = m.jobs;
+        if (clearedJobIds.has(m.job_id) || clearedJobIds.has(job?.id || "")) {
+          return false;
+        }
+        if (!hasActiveJobLink(job)) return false;
+        if (canAutoSendJob(job)) return false;
+        if (job && shouldExcludeJob(job)) return false;
+        if (job && signals && isFamilyMismatchForResume(job, signals)) {
+          return false;
+        }
+        return true;
+      }),
     );
 
     const hasServerFilters =
@@ -141,7 +189,7 @@ export async function GET(request: Request) {
     // Without query-param filters: return a wide active set so the client can
     // filter (kind/date/location) before capping at POOL_LIMIT (50).
     const pool = hasServerFilters
-      ? buildPoolMatches(available, filters, POOL_LIMIT)
+      ? buildPoolMatches(available, filters, POOL_LIMIT, signals)
       : available.slice(0, 200);
 
     return NextResponse.json({

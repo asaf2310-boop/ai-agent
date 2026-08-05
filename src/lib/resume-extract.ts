@@ -123,37 +123,37 @@ export type ResumeSignals = {
 const ROLE_PATTERNS: Array<{ family: RoleFamily; re: RegExp; title?: string }> = [
   {
     family: "product",
-    re: /product\s*manager|product\s*owner|מנהל(?:ת)?\s*מוצר|בעלי?\s*מוצר|\bpm\b|head of product|vp product/i,
+    re: /product\s*manager|product\s*owner|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*מוצר|בעלי?\s*מוצר|\bpm\b|head of product|vp product/i,
     title: "product manager",
   },
   {
     family: "product",
-    re: /product\s*analyst|אנליסט(?:ית)?\s*מוצר|product\s*operations|product\s*marketing/i,
-    title: "product",
+    re: /product\s*analyst|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*מוצר|product\s*operations|product\s*marketing/i,
+    title: "product analyst",
   },
   {
     family: "data_ai",
-    re: /machine\s*learning|ml\s*engineer|data\s*scientist|llm|gen(?:erative)?\s*ai|בינה מלאכותית|מדען(?:ית)? נתונים|nlp engineer|ai engineer|prompt engineer/i,
+    re: /machine\s*learning|ml\s*engineer|data\s*scientist|llm engineer|gen(?:erative)?\s*ai engineer|מדען(?:\s*\/\s*ית)?(?:ית)?\s*נתונים|nlp engineer|ai engineer|prompt engineer/i,
     title: "ai / ml",
   },
   {
     family: "data_ai",
-    re: /data\s*analyst|data\s*engineer|אנליסט(?:ית)? נתונים|bi analyst|analytics engineer/i,
-    title: "data",
+    re: /data\s*analyst|data\s*engineer|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*נתונים|bi analyst|analytics engineer/i,
+    title: "data analyst",
   },
   {
     family: "engineering",
-    re: /software\s*engineer|full\s*stack|fullstack|backend|frontend|devops|sre|מפתח(?:ת)?|מהנדס(?:ת)?\s*תוכנה|developer|programmer/i,
+    re: /software\s*engineer|full\s*stack|fullstack|backend engineer|frontend engineer|devops|sre|מפתח(?:\s*\/\s*ת)?(?:ת)?\s*תוכנה|מהנדס(?:\s*\/\s*ת)?(?:ת)?\s*תוכנה/i,
     title: "software engineer",
   },
   {
     family: "finance",
-    re: /fp&a|financial\s*analyst|controller|חשב(?:ת)?|כלכל(?:ן|נית)|תקציב|fintech analyst|accountant|רואה חשבון/i,
+    re: /fp&a|financial\s*analyst|controller|חשב(?:\s*\/\s*ת)?(?:ת)?|כלכל(?:ן|נית)|תקציב|fintech analyst|accountant|רואה חשבון/i,
     title: "finance",
   },
   {
     family: "management",
-    re: /project\s*manager|program\s*manager|operations\s*manager|team\s*lead|מנהל(?:ת)?\s*פרויקט|מנהל(?:ת)?\s*תפעול|delivery manager/i,
+    re: /project\s*manager|program\s*manager|operations\s*manager|team\s*lead|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*פרויקט|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*תפעול|delivery manager/i,
     title: "project / operations",
   },
   {
@@ -163,12 +163,12 @@ const ROLE_PATTERNS: Array<{ family: RoleFamily; re: RegExp; title?: string }> =
   },
   {
     family: "marketing",
-    re: /marketing|growth\s*manager|שיווק|demand gen|content marketing|brand manager/i,
+    re: /marketing manager|growth\s*manager|שיווק דיגיטלי|demand gen|content marketing|brand manager|product marketing/i,
     title: "marketing",
   },
   {
     family: "design",
-    re: /product\s*designer|ux|ui\/ux|graphic designer|מעצב(?:ת)?/i,
+    re: /product\s*designer|ux designer|ui\/ux|graphic designer|מעצב(?:\s*\/\s*ת)?(?:ת)?\s*מוצר/i,
     title: "design",
   },
   {
@@ -177,6 +177,23 @@ const ROLE_PATTERNS: Array<{ family: RoleFamily; re: RegExp; title?: string }> =
     title: "hr",
   },
 ];
+
+/** Normalize Hebrew gender-slash titles so מנהל/ת matches patterns. */
+export function normalizeHebrewRoleText(text: string): string {
+  return text
+    .replace(/מנהל\s*\/\s*ת/gi, "מנהל/ת")
+    .replace(/מנהל\/ת/gi, "מנהלת")
+    .replace(/מפתח\s*\/\s*ת/gi, "מפתח/ת")
+    .replace(/מפתח\/ת/gi, "מפתחת")
+    .replace(/מהנדס\s*\/\s*ת/gi, "מהנדס/ת")
+    .replace(/מהנדס\/ת/gi, "מהנדסת")
+    .replace(/אנליסט\s*\/\s*ית/gi, "אנליסט/ית")
+    .replace(/אנליסט\/ית/gi, "אנליסטית")
+    .replace(/חשב\s*\/\s*ת/gi, "חשב/ת")
+    .replace(/חשב\/ת/gi, "חשבת")
+    .replace(/מעצב\s*\/\s*ת/gi, "מעצב/ת")
+    .replace(/מעצב\/ת/gi, "מעצבת");
+}
 
 function normalizeSkill(s: string): string {
   const t = s.trim().toLowerCase();
@@ -187,27 +204,41 @@ function normalizeSkill(s: string): string {
 }
 
 export function extractSkills(text: string): string[] {
-  const lower = text.toLowerCase();
+  const lower = normalizeHebrewRoleText(text).toLowerCase();
   const found = KNOWN_SKILLS.filter((skill) => lower.includes(skill.trim()));
   const domains: string[] = [];
   if (/ai|llm|machine learning|בינה מלאכותית|אלגוריתם|deep learning|nlp|rag/i.test(text)) {
     domains.push("ai");
   }
-  if (/product manager|product owner|מנהל(?:ת)? מוצר|roadmap|product management/i.test(text)) {
+  if (
+    /product manager|product owner|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*מוצר|roadmap|product management/i.test(
+      text,
+    )
+  ) {
     domains.push("product");
   }
   if (/finance|פיננס|חשב|תקציב|fp&a|אשראי|fintech|ifrs/i.test(text)) {
     domains.push("finance");
   }
-  if (/ניהול|manager|operations|תפעול|team lead|מנהל|project manager/i.test(text)) {
+  // Don't tag every "מנהל" / "manager" as management — too noisy on Product CVs
+  if (
+    /project manager|operations manager|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*פרויקט|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*תפעול|team lead|ראש צוות/i.test(
+      text,
+    )
+  ) {
     domains.push("management");
   }
-  if (/marketing|שיווק|growth/i.test(text)) domains.push("marketing");
-  if (/sales|מכירות|customer success|הצלחת לקוחות/i.test(text)) {
+  if (/marketing|שיווק|growth manager|demand gen/i.test(text)) {
+    domains.push("marketing");
+  }
+  if (
+    /\bsales\b|מכירות|customer success|הצלחת לקוחות|\bbdr\b|\bcsm\b/i.test(text) &&
+    !/salesforce/i.test(text)
+  ) {
     domains.push("sales");
   }
   if (
-    /software|developer|engineer|מפתח|fullstack|full stack|backend|frontend|devops/i.test(
+    /software engineer|developer|מפתח(?:\s*\/\s*ת)?(?:ת)?\s*תוכנה|fullstack|full stack|backend engineer|frontend engineer|devops/i.test(
       text,
     )
   ) {
@@ -256,7 +287,9 @@ export function extractResumeSignals(
   text: string | null | undefined,
   existingSkills: string[] = [],
 ): ResumeSignals {
-  const raw = (text || "").trim();
+  const raw = normalizeHebrewRoleText((text || "").trim());
+  // Prefer the top of the CV (headline / recent roles) for title detection
+  const head = raw.slice(0, 1200);
   const skills = [
     ...new Set([
       ...existingSkills.map(normalizeSkill),
@@ -267,28 +300,44 @@ export function extractResumeSignals(
   const titles: string[] = [];
 
   for (const pattern of ROLE_PATTERNS) {
-    if (pattern.re.test(raw) || skills.some((s) => pattern.re.test(s))) {
+    const inHead = pattern.re.test(head);
+    const inBody = !inHead && pattern.re.test(raw);
+    const inSkills = skills.some((s) => pattern.re.test(s));
+    if (inHead || inBody) {
       families.add(pattern.family);
       if (pattern.title) titles.push(pattern.title);
+    } else if (inSkills && pattern.family !== "engineering") {
+      families.add(pattern.family);
+      if (pattern.title && pattern.family === "product") {
+        titles.push(pattern.title);
+      }
     }
+  }
+
+  // Explicit AI Product Manager phrasing (title-quality signal)
+  if (
+    /(?:ai|llm|gen(?:erative)?\s*ai|בינה)\s*.{0,24}(?:product\s*manager|מנהל(?:ת)?\s*מוצר)|(?:product\s*manager|מנהל(?:ת)?\s*מוצר)\s*.{0,24}(?:ai|llm|gen(?:erative)?\s*ai|בינה)/i.test(
+      raw,
+    )
+  ) {
+    families.add("product");
+    titles.unshift("AI product manager");
   }
 
   // Domain tags → families (avoid loose tags flooding the wrong role family)
   if (skills.includes("product") || skills.includes("product management")) {
     families.add("product");
   }
-  // Bare "ai" on a Product/Finance CV must not pull pure AI Engineer roles
+  // Strong AI/ML skills → data_ai only when CV is not clearly Product-primary
   if (
     skills.includes("llm") ||
     skills.includes("machine learning") ||
     skills.includes("deep learning") ||
     skills.includes("pytorch") ||
     skills.includes("tensorflow") ||
-    skills.includes("data science") ||
-    (/בינה מלאכותית|data scientist|ml engineer|prompt engineer/i.test(raw) &&
-      !families.has("product"))
+    skills.includes("data science")
   ) {
-    families.add("data_ai");
+    if (!families.has("product")) families.add("data_ai");
   } else if (
     skills.includes("ai") &&
     !families.has("product") &&

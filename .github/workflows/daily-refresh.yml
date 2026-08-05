@@ -82,7 +82,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_SCHEMA: job_agent
-          MIN_MATCH_SCORE: "0.2"
+          MIN_MATCH_SCORE: "0.42"
           MAX_JOB_AGE_DAYS: "7"
           DAILY_AUTO_APPLY_QUOTA: "20"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
