@@ -562,7 +562,7 @@ export function HomeClient({ email }: { email?: string | null }) {
               (!json.resendConfigured
                 ? " · חסר RESEND_API_KEY ב-Vercel לשליחת מייל"
                 : "") +
-              ` · בפול ${Math.min(json.matchesCount ?? 0, 50)} ידניות`,
+              ` · בפול ${Math.min(json.matchesCount ?? 0, 50)} משרות`,
       );
       setTab(sent > 0 ? "history" : "pool");
     } catch (err) {
