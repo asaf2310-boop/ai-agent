@@ -98,11 +98,11 @@ const STOPWORDS = new Set([
 const FAMILY_PATTERNS: Array<{ family: RoleFamily; re: RegExp }> = [
   {
     family: "product",
-    re: /product\s*manager|product\s*owner|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*מוצר|בעלי?\s*מוצר|\bpm\b|head of product|product\s*analyst|product\s*operations/i,
+    re: /product\s*manager|product\s*owner|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*מוצר|בעלי?\s*מוצר|\bpm\b|head of product|product\s*analyst|product\s*operations|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*מוצר|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*עסקי|business\s*analyst/i,
   },
   {
     family: "data_ai",
-    re: /machine\s*learning|ml\s*engineer|data\s*scientist|llm|gen(?:erative)?\s*ai|בינה מלאכותית|ai engineer|prompt engineer|data\s*analyst|data\s*engineer|nlp/i,
+    re: /machine\s*learning|ml\s*engineer|data\s*scientist|llm|gen(?:erative)?\s*ai|בינה מלאכותית|ai engineer|prompt engineer|data\s*analyst|data\s*engineer|nlp|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*נתונים|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*דאטה|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*בינה/i,
   },
   {
     family: "engineering",
@@ -110,7 +110,7 @@ const FAMILY_PATTERNS: Array<{ family: RoleFamily; re: RegExp }> = [
   },
   {
     family: "finance",
-    re: /fp&a|financial\s*analyst|controller|חשב(?:\s*\/\s*ת)?(?:ת)?|כלכל(?:ן|נית)|fintech|accountant|רואה חשבון|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*חשבונות/i,
+    re: /fp&a|financial\s*analyst|controller|חשב(?:\s*\/\s*ת)?(?:ת)?|כלכל(?:ן|נית)|fintech|accountant|רואה חשבון|מנהל(?:\s*\/\s*ת)?(?:ת)?\s*חשבונות|אנליסט(?:\s*\/\s*ית)?(?:ית)?\s*פיננס/i,
   },
   {
     family: "management",
@@ -173,7 +173,11 @@ export function isDeveloperTitle(title: string | null | undefined): boolean {
   if (!title) return false;
   // Don't treat "AI Product Manager" / non-coding roles as developers
   if (isProductManagerTitle(title) || isProjectManagerTitle(title)) return false;
-  if (/product\s*(?:manager|owner|analyst)|מנהל(?:ת)?\s*מוצר|data\s*scientist|data\s*analyst/i.test(title)) {
+  if (
+    /product\s*(?:manager|owner|analyst)|מנהל(?:ת)?\s*מוצר|אנליסט(?:ית)?\s*מוצר|data\s*scientist|data\s*analyst|אנליסט(?:ית)?\s*נתונים/i.test(
+      title,
+    )
+  ) {
     return false;
   }
   return DEVELOPER_TITLE_RE.test(title);
@@ -239,8 +243,7 @@ export function isFamilyMismatchForResume(
           `${job.title || ""} ${job.description || ""}`.slice(0, 800),
         );
   if (!jobFamilies.length) return false;
-  const shared = jobFamilies.filter((f) => resumeFamilies.includes(f));
-  return shared.length === 0;
+  return familiesCompatible(resumeFamilies, jobFamilies).length === 0;
 }
 
 /** Share of letters in text that are Hebrew (0–1). */
@@ -295,24 +298,50 @@ function jobYearsRequired(haystack: string): number | null {
   return n > 0 && n < 40 ? n : null;
 }
 
+/** Families that often overlap in practice (product analyst ↔ data, etc.). */
+const ADJACENT_FAMILIES: Partial<Record<RoleFamily, RoleFamily[]>> = {
+  product: ["data_ai"],
+  data_ai: ["product"],
+};
+
+function familiesCompatible(
+  resumeFamilies: RoleFamily[],
+  jobFamilies: RoleFamily[],
+): RoleFamily[] {
+  const shared = jobFamilies.filter((f) => resumeFamilies.includes(f));
+  if (shared.length) return shared;
+  // Adjacent families count as soft overlap (not a hard mismatch)
+  const adjacent: RoleFamily[] = [];
+  for (const rf of resumeFamilies) {
+    for (const adj of ADJACENT_FAMILIES[rf] || []) {
+      if (jobFamilies.includes(adj)) adjacent.push(adj);
+    }
+  }
+  return adjacent;
+}
+
 function familyOverlapScore(
   resumeFamilies: RoleFamily[],
   jobFamilies: RoleFamily[],
 ): { score: number; shared: RoleFamily[] } {
   if (!jobFamilies.length) {
-    // Unknown job family — don't gift a mid score that clears the pool floor
-    return { score: resumeFamilies.length ? 0.12 : 0.15, shared: [] };
+    // Unknown job family — allow title/skill signal to lift above the pool floor
+    return { score: resumeFamilies.length ? 0.22 : 0.2, shared: [] };
   }
   if (!resumeFamilies.length) {
-    return { score: 0.12, shared: [] };
+    return { score: 0.18, shared: [] };
   }
-  const shared = jobFamilies.filter((f) => resumeFamilies.includes(f));
-  if (!shared.length) {
-    // Hard mismatch between clear role families (e.g. finance CV vs pure eng job)
-    return { score: 0.04, shared: [] };
+  const exact = jobFamilies.filter((f) => resumeFamilies.includes(f));
+  if (exact.length) {
+    const ratio = exact.length / Math.max(jobFamilies.length, 1);
+    return { score: Math.min(1, 0.5 + ratio * 0.5), shared: exact };
   }
-  const ratio = shared.length / Math.max(jobFamilies.length, 1);
-  return { score: Math.min(1, 0.5 + ratio * 0.5), shared };
+  const adjacent = familiesCompatible(resumeFamilies, jobFamilies);
+  if (adjacent.length) {
+    return { score: 0.55, shared: adjacent };
+  }
+  // Hard mismatch between clear role families (e.g. finance CV vs pure eng job)
+  return { score: 0.04, shared: [] };
 }
 
 function seniorityScore(
@@ -480,14 +509,22 @@ export function scoreMatch(
     ).toFixed(4),
   );
 
-  // Soft floors only with real title evidence — not skill-tag coincidence
+  // Soft floors with title evidence (Hebrew titles often share 1–2 tokens)
+  if (
+    shared.length &&
+    titleHits.length >= 1 &&
+    skillHits.length >= 1 &&
+    score < 0.32
+  ) {
+    score = 0.32;
+  }
   if (
     shared.length &&
     titleHits.length >= 2 &&
     skillHits.length >= 1 &&
-    score < 0.42
+    score < 0.38
   ) {
-    score = 0.42;
+    score = 0.38;
   }
   if (
     shared.length >= 1 &&
@@ -504,9 +541,9 @@ export function scoreMatch(
     score = Math.min(score, 0.2);
   }
 
-  // Unknown job family + no title overlap → keep below pool floor
-  if (!jobFamilies.length && titleHits.length < 2) {
-    score = Math.min(score, 0.28);
+  // Unknown job family + weak title overlap → keep modest
+  if (!jobFamilies.length && titleHits.length < 1) {
+    score = Math.min(score, 0.3);
   }
 
   // Tiny lexical-only matches shouldn't surface as "good"

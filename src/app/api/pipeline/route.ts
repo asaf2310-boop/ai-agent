@@ -26,7 +26,7 @@ import {
 import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Application, Resume } from "@/lib/types";
 import { shouldExcludeJob } from "@/lib/matching";
-import { canAutoSendJob } from "@/lib/web-apply";
+import { isPoolAutoTrackJob } from "@/lib/web-apply";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -146,12 +146,21 @@ export async function POST(request: Request) {
     );
 
     // Also refresh pool matches (manual-only jobs for the pool UI)
-    const matches = await matchResumeToJobs(
+    let matches = await matchResumeToJobs(
       supabase,
       resume,
       undefined,
       user.id,
     );
+    // If the stricter floor left nothing usable for the pool, retry softer
+    if (!matches.length) {
+      matches = await matchResumeToJobs(
+        supabase,
+        resume,
+        Number(process.env.AUTO_APPLY_MIN_MATCH_SCORE || "0.28"),
+        user.id,
+      );
+    }
 
     const appRows = autoApplications as Application[];
     const sentCount = appRows.filter((a) =>
@@ -223,7 +232,7 @@ export async function POST(request: Request) {
         (m) =>
           !clearedJobIds.has(m.job_id) &&
           hasActiveJobLink(m.jobs) &&
-          !canAutoSendJob(m.jobs) &&
+          !isPoolAutoTrackJob(m.jobs) &&
           !(m.jobs && shouldExcludeJob(m.jobs)),
       ),
     ).slice(0, Math.max(POOL_LIMIT, 200));
