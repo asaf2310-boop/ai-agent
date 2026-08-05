@@ -26,7 +26,6 @@ import {
 import { extractResumeSignals } from "@/lib/resume-extract";
 import type { Application, Resume } from "@/lib/types";
 import { shouldExcludeJob } from "@/lib/matching";
-import { isPoolAutoTrackJob } from "@/lib/web-apply";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -145,14 +144,14 @@ export async function POST(request: Request) {
       },
     );
 
-    // Also refresh pool matches (manual-only jobs for the pool UI)
+    // Also refresh pool matches — all good fits with an open link (not only "manual")
     let matches = await matchResumeToJobs(
       supabase,
       resume,
       undefined,
       user.id,
     );
-    // If the stricter floor left nothing usable for the pool, retry softer
+    // Soft floor if nothing cleared the default threshold
     if (!matches.length) {
       matches = await matchResumeToJobs(
         supabase,
@@ -161,6 +160,16 @@ export async function POST(request: Request) {
         user.id,
       );
     }
+
+    // Keep auto-candidates visible in the pool when send fails / isn't possible yet
+    const poolByJob = new Map<string, (typeof matches)[number]>();
+    for (const m of matches) {
+      if (m.job_id) poolByJob.set(m.job_id, m);
+    }
+    for (const m of autoCandidates) {
+      if (m.job_id && !poolByJob.has(m.job_id)) poolByJob.set(m.job_id, m);
+    }
+    matches = [...poolByJob.values()];
 
     const appRows = autoApplications as Application[];
     const sentCount = appRows.filter((a) =>
@@ -226,13 +235,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Pool = manual-only (active link, not auto-email / ATS). UI caps at POOL_LIMIT.
+    // Pool = matched jobs with a real link, until sent / opened / dismissed
     const poolMatches = sortMatchesByBestFit(
       matches.filter(
         (m) =>
           !clearedJobIds.has(m.job_id) &&
           hasActiveJobLink(m.jobs) &&
-          !isPoolAutoTrackJob(m.jobs) &&
           !(m.jobs && shouldExcludeJob(m.jobs)),
       ),
     ).slice(0, Math.max(POOL_LIMIT, 200));

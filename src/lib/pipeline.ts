@@ -459,7 +459,7 @@ export async function syncLinkedInJobs(
 export async function matchResumeToJobs(
   supabase: DbClient,
   resume: Resume,
-  minScore = Number(process.env.MIN_MATCH_SCORE || "0.32"),
+  minScore = Number(process.env.MIN_MATCH_SCORE || "0.28"),
   userId?: string,
 ): Promise<JobMatch[]> {
   const resumeText =
