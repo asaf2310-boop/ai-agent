@@ -18,8 +18,29 @@ import {
 } from "@/lib/resume-extract";
 import type { Resume } from "@/lib/types";
 
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
+
 const BUCKET =
   process.env.NEXT_PUBLIC_SUPABASE_RESUME_BUCKET || "job-agent-resumes";
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Load saved resume for the logged-in user (no re-upload). */
 export async function GET() {
@@ -55,7 +76,13 @@ export async function GET() {
     return NextResponse.json({ resume: latest?.[0] ?? null });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to load resume";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const he =
+      /Missing NEXT_PUBLIC_SUPABASE|SUPABASE_SERVICE/i.test(message)
+        ? "חסרים הגדרות Supabase בשרת"
+        : message === "Failed to load resume"
+          ? "טעינת הקו״ח נכשלה"
+          : message;
+    return NextResponse.json({ error: he }, { status: 500 });
   }
 }
 
@@ -162,13 +189,21 @@ export async function POST(request: Request) {
     await ensureSampleJobs(supabase);
     const boardQueries = buildIlBoardSearchQueries(signals);
     const linkedInQueries = buildLinkedInSearchQueries(signals);
-    await syncLiveSocialJobs(supabase);
-    await syncIsraeliBoards(supabase, {
-      queries: boardQueries,
-      signals: signals || undefined,
-    });
-    await syncCompanyCareerJobs(supabase);
-    await syncLinkedInJobs(supabase, { queries: linkedInQueries });
+    await withTimeout(syncLiveSocialJobs(supabase), 30_000, 0);
+    await withTimeout(
+      syncIsraeliBoards(supabase, {
+        queries: boardQueries,
+        signals: signals || undefined,
+      }),
+      75_000,
+      { drushim: 0, alljobs: 0, jobmaster: 0, jobify: 0 },
+    );
+    await withTimeout(syncCompanyCareerJobs(supabase), 40_000, 0);
+    await withTimeout(
+      syncLinkedInJobs(supabase, { queries: linkedInQueries }),
+      40_000,
+      0,
+    );
     const matches = await matchResumeToJobs(supabase, resume, undefined, user.id);
     const applications = await processApplicationsForResume(
       supabase,
@@ -185,6 +220,12 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Upload failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          message === "Upload failed" ? "ההעלאה נכשלה" : message,
+      },
+      { status: 500 },
+    );
   }
 }

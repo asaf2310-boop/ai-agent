@@ -14,10 +14,14 @@ import {
   isFamilyMismatchForResume,
   shouldExcludeJob,
 } from "@/lib/matching";
+import { matchResumeToJobs } from "@/lib/pipeline";
 import { extractResumeSignals } from "@/lib/resume-extract";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { Resume } from "@/lib/types";
+import type { JobMatch, Resume } from "@/lib/types";
 import { canAutoSendJob } from "@/lib/web-apply";
+
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 function parseFilters(searchParams: URLSearchParams): MatchPoolFilters {
   const kind = (searchParams.get("kind") || "all") as MatchPoolFilters["kind"];
@@ -60,6 +64,7 @@ export async function GET(request: Request) {
 
     // Load resume signals so we can drop family-mismatched rows written by older scrapers
     let signals = null as ReturnType<typeof extractResumeSignals> | null;
+    let resumeRow: Resume | null = null;
     try {
       let resumeQ = supabase
         .from("resumes")
@@ -84,13 +89,13 @@ export async function GET(request: Request) {
           .limit(1);
       }
       const { data: resumes } = await resumeQ;
-      const resume = (resumes?.[0] || null) as Resume | null;
-      if (resume) {
+      resumeRow = (resumes?.[0] || null) as Resume | null;
+      if (resumeRow) {
         const text =
-          resume.extracted_text ||
-          (resume.skills || []).join(" ") ||
-          resume.filename;
-        signals = extractResumeSignals(text, resume.skills || []);
+          resumeRow.extracted_text ||
+          (resumeRow.skills || []).join(" ") ||
+          resumeRow.filename;
+        signals = extractResumeSignals(text, resumeRow.skills || []);
       }
     } catch {
       // best-effort — still return score-filtered matches
@@ -162,7 +167,7 @@ export async function GET(request: Request) {
       // if applications query fails, return unfiltered matches
     }
 
-    const available = sortMatchesByBestFit(
+    let available = sortMatchesByBestFit(
       matches.filter((m) => {
         const job = m.jobs;
         if (clearedJobIds.has(m.job_id) || clearedJobIds.has(job?.id || "")) {
@@ -177,6 +182,35 @@ export async function GET(request: Request) {
         return true;
       }),
     );
+
+    // Stale/empty pool after matcher upgrades — rematch from jobs already in DB
+    if (available.length === 0 && resumeRow) {
+      try {
+        const rematched = (await matchResumeToJobs(
+          supabase,
+          resumeRow,
+          minScore,
+          user.id,
+        )) as JobMatch[];
+        available = sortMatchesByBestFit(
+          rematched.filter((m) => {
+            const job = m.jobs;
+            if (
+              clearedJobIds.has(m.job_id) ||
+              clearedJobIds.has(job?.id || "")
+            ) {
+              return false;
+            }
+            if (!hasActiveJobLink(job)) return false;
+            if (canAutoSendJob(job)) return false;
+            if (job && shouldExcludeJob(job)) return false;
+            return true;
+          }),
+        );
+      } catch {
+        // keep empty pool — client will prompt to scan
+      }
+    }
 
     const hasServerFilters =
       filters.kind !== DEFAULT_POOL_FILTERS.kind ||
@@ -203,6 +237,14 @@ export async function GET(request: Request) {
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to load matches";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const he =
+      /Missing NEXT_PUBLIC_SUPABASE|SUPABASE_SERVICE/i.test(message)
+        ? "חסרים הגדרות Supabase בשרת"
+        : /Failed to fetch|fetch failed|ECONN|timeout|aborted/i.test(message)
+          ? "הטעינה נכשלה — בדוק חיבור ונסה שוב"
+          : message === "Failed to load matches"
+            ? "טעינת המשרות נכשלה"
+            : message;
+    return NextResponse.json({ error: he }, { status: 500 });
   }
 }
